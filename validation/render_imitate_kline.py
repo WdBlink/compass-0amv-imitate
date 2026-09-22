@@ -1,7 +1,7 @@
 """
 0AMV 仿版 vs 指南针原版 K 线对比图渲染脚本。
 
-输入: 用 akshare 拉真实 A 股数据，跑零_amv.py 出 0AMV 序列。
+输入: 用东方财富沪深指数成交额聚合真实市场 amount，跑 zero_amv.py。
 输出:
   - output/imitate_0amv_kline.png  —— 仿版 0AMV K 线图（指南针配色）
   - output/imitate_0amv_full.png   —— 仿版 0AMV K 线 + 生命线 + 5/13 均线
@@ -24,6 +24,11 @@ from matplotlib.lines import Line2D
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from zero_amv import compute_0amv, FitLevel
+from market_data import load_mainland_market_amount
+
+plt.rcParams["font.sans-serif"] = ["PingFang SC", "Arial Unicode MS", "DejaVu Sans"]
+plt.rcParams["font.monospace"] = ["Arial Unicode MS", "DejaVu Sans Mono"]
+plt.rcParams["axes.unicode_minus"] = False
 
 # ============================================================================
 # 指南针官方配色 (从 M3 视觉分析得出)
@@ -33,8 +38,8 @@ COLORS = {
     "fg": "#FFFFFF",          # 白色文字
     "k_red": "#FF0033",       # 红涨（指南针特色：饱和红）
     "k_cyan": "#00AACC",      # 青蓝跌（指南针特色：不是绿色！）
-    "ma5": "#FFFF00",         # 5 日成本均线（黄）
-    "ma13": "#CC00CC",        # 13 日成本均线（紫）
+    "ma5": "#FFFF00",         # EMA12 代理线（黄）
+    "ma13": "#CC00CC",        # 民间公式 C13（紫）
     "life_line": "#00CCFF",   # 生命线（青色）
     "grid": "#333333",        # 暗灰网格
     "annotation": "#FF6600",  # 数值标注（橙）
@@ -125,19 +130,19 @@ def draw_compass_kline(
                     color=main_color, linewidth=0.8, zorder=2)
 
     # ----------------------------------------------------------------------
-    # 均线：5 日成本均线（黄色） + 13 日（紫色） + 34 日（橙色，可选）
+    # 平滑线：EMA12（黄色）+ 民间公式 C13/C34（可选）
     # ----------------------------------------------------------------------
     if "0amv_life_line" in df_amv.columns:
         ax.plot(x, df_amv["0amv_life_line"].values,
                 color=COLORS["ma5"], linewidth=1.4, zorder=4.5,
-                label="成本均线 5", antialiased=True)
+                label="EMA12 代理线", antialiased=True)
     if show_ma13 and "0amv_c13" in df_amv.columns:
         c13 = df_amv["0amv_c13"].values
         valid = ~np.isnan(c13)
         if valid.sum() > 0:
             ax.plot(x[valid], c13[valid],
                     color=COLORS["ma13"], linewidth=1.2, zorder=4.3,
-                    label="成本均线 13", antialiased=True)
+                    label="民间公式 C13", antialiased=True)
     if show_ma34 and "0amv_c34" in df_amv.columns:
         c34 = df_amv["0amv_c34"].values
         valid = ~np.isnan(c34)
@@ -187,20 +192,20 @@ def draw_compass_kline(
             transform=ax.transAxes, color=COLORS["ma5"],
             fontsize=10, weight="bold", verticalalignment="top",
             family="monospace")
-    # 成本均线参数
+    # 平滑线参数
     if not np.isnan(last_life):
         ax.text(0.02, info_box_y - 0.06,
-                f"成本均线 (CYC)",
+                "平滑线",
                 transform=ax.transAxes, color=COLORS["fg"],
                 fontsize=8, family="monospace", verticalalignment="top")
     if not np.isnan(last_life):
         ax.text(0.02, info_box_y - 0.10,
-                f"5: {last_life:,.2f}",
+                f"EMA12: {last_life:,.2f}",
                 transform=ax.transAxes, color=COLORS["ma5"],
                 fontsize=9, family="monospace", weight="bold", verticalalignment="top")
     if not np.isnan(last_c13) and show_ma13:
         ax.text(0.02, info_box_y - 0.14,
-                f"13: {last_c13:,.2f}",
+                f"C13: {last_c13:,.2f}",
                 transform=ax.transAxes, color=COLORS["ma13"],
                 fontsize=9, family="monospace", weight="bold", verticalalignment="top")
 
@@ -276,40 +281,21 @@ def draw_volume_panel(ax: plt.Axes, df_amv: pd.DataFrame) -> None:
 # ============================================================================
 
 def run_validation(n_days: int = 100) -> dict[str, Path]:
-    """跑 100 天真实 A 股数据，画仿版 0AMV K 线图。"""
-    import akshare as ak
+    """用沪深市场真实成交额画仿版 0AMV 图。"""
 
     out_dir = Path(__file__).parent / "output"
     out_dir.mkdir(exist_ok=True)
 
-    # 拉沪深 300 指数最近 n_days 个交易日
-    print(f"正在拉取沪深 300 指数最近 {n_days} 个交易日数据...")
-    df = ak.stock_zh_index_daily(symbol="sh000300")
-    df["date"] = pd.to_datetime(df["date"])
-    df = df.sort_values("date").tail(n_days + 30).reset_index(drop=True)
-
-    # 关键：amount 不能用 volume × close (这俩完全正相关，会让 K 线全单调)
-    # 应该让 amount 反映「市场情绪 / 资金活跃度」，独立于 close 的简单乘积
-    # 用真实 A 股特征：amount 与 close 趋势正相关 + 独立噪声
-    np.random.seed(42)
-    base_amount = df["close"] * df["volume"]  # 基础 amount
-    # 资金活跃度是独立随机过程（市场情绪）
-    activity = np.random.lognormal(mean=0.0, sigma=0.15, size=len(df))  # 15% 日波动
-    # 让 activity 跟 close 趋势弱相关（牛市更活跃）
-    close_trend = df["close"].pct_change().fillna(0)
-    activity = activity * (1 + close_trend * 5)  # 趋势放大活跃度
-    df["amount"] = base_amount * activity
-    df["capital"] = 4e12
-    df = df.set_index("date")
+    print("正在拉取沪深市场真实成交额...")
+    df = load_mainland_market_amount("2014-01-01", pd.Timestamp.today().strftime("%Y-%m-%d"))
 
     print(f"数据范围: {df.index[0].date()} — {df.index[-1].date()}, {len(df)} 个交易日")
     print(f"amount 范围 (亿元): {df['amount'].min()/1e8:,.0f} — {df['amount'].max()/1e8:,.0f}")
 
     # 跑 0AMV
-    print("正在计算 0AMV (full 层级)...")
-    result = compute_0amv(df, fit_level=FitLevel.FULL)
+    print("正在计算 0AMV (standard 层级)...")
+    result = compute_0amv(df, fit_level=FitLevel.STANDARD)
     print(f"0AMV_close 范围: {result['0amv_close'].min():,.0f} — {result['0amv_close'].max():,.0f}")
-    print(f"指南针原版范围: 5,000 — 100,000")
 
     # 给 figure 准备 amount/volume 透传（绘图用）
     result["0amv_amount"] = df["amount"]
@@ -318,7 +304,7 @@ def run_validation(n_days: int = 100) -> dict[str, Path]:
     fig, ax = plt.subplots(figsize=(14, 7), facecolor=COLORS["bg"])
     draw_compass_kline(
         ax, result,
-        title=f"0AMV 活跃市值指数（仿制版）— 沪深 300 / {df.index[0].date()} ~ {df.index[-1].date()}",
+        title=f"0AMV 民间公式代理 — 沪深市场真实成交额 / {df.index[0].date()} ~ {df.index[-1].date()}",
         n_recent=n_days,
     )
     out1 = out_dir / "imitate_0amv_kline.png"
@@ -368,7 +354,7 @@ def run_validation(n_days: int = 100) -> dict[str, Path]:
     axes[1].tick_params(axis="x", colors=COLORS["fg"], labelsize=8)
     axes[1].grid(True, color=COLORS["grid"], linestyle=":", alpha=0.5)
     axes[1].set_title("0AMV 收盘价 + 生命线", color=COLORS["fg"],
-                      family="Microsoft YaHei", fontsize=10)
+                      family="sans-serif", fontsize=10)
     axes[1].legend(loc="upper left", facecolor=COLORS["bg"],
                    edgecolor=COLORS["fg"], labelcolor=COLORS["fg"], fontsize=8)
     for spine in axes[1].spines.values():
@@ -386,7 +372,7 @@ def run_validation(n_days: int = 100) -> dict[str, Path]:
     axes[2].tick_params(axis="x", colors=COLORS["fg"], labelsize=8)
     axes[2].grid(True, axis="y", color=COLORS["grid"], linestyle=":", alpha=0.5)
     axes[2].set_title("0AMV 日涨跌幅 (%)", color=COLORS["fg"],
-                      family="Microsoft YaHei", fontsize=10)
+                      family="sans-serif", fontsize=10)
     for spine in axes[2].spines.values():
         spine.set_color(COLORS["fg"])
 

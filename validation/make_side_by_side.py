@@ -7,16 +7,13 @@ import sys
 from pathlib import Path
 
 import matplotlib.pyplot as plt
-import numpy as np
-import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 sys.path.insert(0, str(Path(__file__).parent))
 
 from render_imitate_kline import COLORS, draw_compass_kline
 from zero_amv import compute_0amv, FitLevel
-
-import akshare as ak
+from market_data import load_mainland_market_amount
 
 
 def make_side_by_side() -> Path:
@@ -24,20 +21,11 @@ def make_side_by_side() -> Path:
     out_dir = Path(__file__).parent / "output"
     out_dir.mkdir(exist_ok=True)
 
-    # 拉真实 A 股 100 天
-    print("拉真实 A 股数据...")
-    df = ak.stock_zh_index_daily(symbol="sh000300")
-    df["date"] = pd.to_datetime(df["date"])
-    df = df.sort_values("date").tail(130).reset_index(drop=True)
-    np.random.seed(42)
-    df["amount"] = (
-        df["close"] * df["volume"]
-        * np.random.lognormal(0, 0.15, len(df))
-    )
-    df["capital"] = 4e12
-    df = df.set_index("date")
+    # 与原版截图使用完全相同的日期窗口。
+    print("拉取 2024-04-10 至 2024-10-10 沪深市场真实成交额...")
+    df = load_mainland_market_amount("2023-01-01", "2024-10-10")
 
-    result = compute_0amv(df, fit_level=FitLevel.FULL).tail(100)
+    result = compute_0amv(df, fit_level=FitLevel.STANDARD).loc["2024-04-10":"2024-10-10"]
 
     fig, axes = plt.subplots(1, 2, figsize=(24, 8), facecolor=COLORS["bg"])
 

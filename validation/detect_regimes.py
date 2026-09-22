@@ -24,9 +24,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 sys.path.insert(0, str(Path(__file__).parent))
 
 from zero_amv import compute_0amv, FitLevel
+from market_data import load_mainland_market_amount
 from render_imitate_kline import COLORS, draw_compass_kline
-
-import akshare as ak
 
 
 # ---------------------------------------------------------------------------
@@ -201,36 +200,35 @@ def compare_with_truth(
     ]
     detected_longs = detected[detected["type"] == "long"].copy() if len(detected) > 0 else pd.DataFrame()
 
-    # 命中: 检测到的多头区间跟真实区间有日期重叠
+    predictions = [(row["start"], row["end"]) for _, row in detected_longs.iterrows()]
+    candidates = []
+    for ti, (ts, te) in enumerate(truth):
+        for pi, (ds, de) in enumerate(predictions):
+            overlap = (min(te, de) - max(ts, ds)).days + 1
+            if overlap > 0:
+                candidates.append((overlap, ti, pi))
+    matched_truth: set[int] = set()
+    matched_predictions: set[int] = set()
     hits = []
-    misses = []  # 没检测到的真实区间
-    for ts, te in truth:
-        matched = False
-        for _, row in detected_longs.iterrows():
-            ds, de = row["start"], row["end"]
-            # 重叠判定
-            if not (de < ts or ds > te):
-                hits.append((ts, te, ds, de))
-                matched = True
-                break
-        if not matched:
-            misses.append((ts, te))
+    for _, ti, pi in sorted(candidates, reverse=True):
+        if ti in matched_truth or pi in matched_predictions:
+            continue
+        matched_truth.add(ti)
+        matched_predictions.add(pi)
+        hits.append((*truth[ti], *predictions[pi]))
+    misses = [interval for i, interval in enumerate(truth) if i not in matched_truth]
+    false_positives = [interval for i, interval in enumerate(predictions) if i not in matched_predictions]
 
-    # 误报: 检测到的多头区间但没匹配任何真实区间
-    false_positives = []
-    for _, row in detected_longs.iterrows():
-        ds, de = row["start"], row["end"]
-        matched = False
-        for ts, te in truth:
-            if not (de < ts or ds > te):
-                matched = True
-                break
-        if not matched:
-            false_positives.append((ds, de))
-
-    precision = len(hits) / max(len(detected_longs), 1) if len(detected_longs) > 0 else 0
+    precision = len(hits) / len(predictions) if predictions else 0
     recall = len(hits) / len(truth) if len(truth) > 0 else 0
     f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0
+
+    truth_days = {day.date() for start, end in truth for day in pd.bdate_range(start, end)}
+    detected_days = {day.date() for start, end in predictions for day in pd.bdate_range(start, end)}
+    overlap_days = truth_days & detected_days
+    day_precision = len(overlap_days) / len(detected_days) if detected_days else 0
+    day_recall = len(overlap_days) / len(truth_days) if truth_days else 0
+    day_f1 = 2 * day_precision * day_recall / (day_precision + day_recall) if day_precision + day_recall else 0
 
     return {
         "truth_count": len(truth),
@@ -241,6 +239,10 @@ def compare_with_truth(
         "precision": precision,
         "recall": recall,
         "f1": f1,
+        "day_precision": day_precision,
+        "day_recall": day_recall,
+        "day_f1": day_f1,
+        "day_iou": len(overlap_days) / len(truth_days | detected_days) if truth_days | detected_days else 0,
     }
 
 
@@ -248,7 +250,7 @@ def compare_with_truth(
 # 主流程
 # ---------------------------------------------------------------------------
 
-# 用户提供的指南针真实多头区间 (12 个)
+# 用户提供的指南针多头区间（13 条，其中存在重叠）
 TRUTH_LONG_RANGES = [
     ("2026-04-08", "2026-05-27"),
     ("2026-01-05", "2026-02-02"),
@@ -270,27 +272,13 @@ def main() -> None:
     out_dir = Path(__file__).parent / "output"
     out_dir.mkdir(exist_ok=True)
 
-    # 拉覆盖 2023-12 到 2026-06 的沪深 300 数据
-    print("拉真实 A 股数据 (2023-12 ~ 2026-06)...")
-    df = ak.stock_zh_index_daily(symbol="sh000300")
-    df["date"] = pd.to_datetime(df["date"])
-    df = df[df["date"] >= "2023-12-01"].sort_values("date").reset_index(drop=True)
-    print(f"  数据范围: {df['date'].iloc[0].date()} — {df['date'].iloc[-1].date()}, {len(df)} 个交易日")
-
-    # 准备 amount (跟之前验证一样：独立噪声)
-    # 用更小的 noise 让 amount 更平滑（指南针原版 amount 是全市场聚合，相对稳定）
-    np.random.seed(42)
-    base_amount = df["close"] * df["volume"]
-    activity = np.random.lognormal(mean=0.0, sigma=0.05, size=len(df))  # 5% 日波动
-    close_trend = df["close"].pct_change().fillna(0)
-    activity = activity * (1 + close_trend * 3)  # 弱相关
-    df["amount"] = base_amount * activity
-    df["capital"] = 4e12
-    df = df.set_index("date")
+    print("拉沪深市场真实成交额...")
+    df = load_mainland_market_amount("2023-01-01", pd.Timestamp.today().strftime("%Y-%m-%d"))
+    print(f"  数据范围: {df.index[0].date()} — {df.index[-1].date()}, {len(df)} 个交易日")
 
     # 跑 0AMV
     print("跑 0AMV 计算...")
-    result = compute_0amv(df, fit_level=FitLevel.FULL)
+    result = compute_0amv(df, fit_level=FitLevel.STANDARD)
 
     # 检测区间
     print("应用规则检测多空区间...")
@@ -313,7 +301,7 @@ def main() -> None:
     # 评估
     eval_result = compare_with_truth(regimes, TRUTH_LONG_RANGES)
 
-    print(f"\n=== 拟合度评估 (vs 指南针真实多头区间) ===")
+    print(f"\n=== 区间规则评估（不是 0AMV 公式拟合度） ===")
     print(f"  真实多头区间数: {eval_result['truth_count']}")
     print(f"  检测到多头区间数: {eval_result['detected_count']}")
     print(f"  命中: {len(eval_result['hits'])}")
@@ -321,7 +309,9 @@ def main() -> None:
     print(f"  误报 (检出但不在真实列表): {len(eval_result['false_positives'])}")
     print(f"  Precision: {eval_result['precision']:.1%}")
     print(f"  Recall:    {eval_result['recall']:.1%}")
-    print(f"  F1:        {eval_result['f1']:.1%}")
+    print(f"  事件 F1:   {eval_result['f1']:.1%}")
+    print(f"  逐日 F1:   {eval_result['day_f1']:.1%}")
+    print(f"  逐日 IoU:  {eval_result['day_iou']:.1%}")
 
     print(f"\n=== 命中详情 ===")
     for ts, te, ds, de in eval_result["hits"]:
