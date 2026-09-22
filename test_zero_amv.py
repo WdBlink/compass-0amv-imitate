@@ -26,7 +26,9 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from zero_amv import (  # noqa: E402
     FitLevel,
+    FormulaVariant,
     QLIB_EXPRESSIONS,
+    calibrate_scale,
     compute_0amv,
     ema,
     ma_ref,
@@ -172,6 +174,20 @@ class TestCompute0AMV:
         valid = result["0amv_close"].dropna()
         assert (valid > 0).all()
 
+    def test_amount_only_uses_market_amount(self, sample_market_df):
+        smooth = sma(sample_market_df["amount"], n=10, m=1)
+        result = compute_0amv(sample_market_df, fit_level="standard")
+        pd.testing.assert_series_equal(result["0amv_close"], smooth / 1e7, check_names=False)
+        pd.testing.assert_series_equal(result["0amv_open"], result["0amv_close"].shift(1), check_names=False)
+
+    def test_price_adjusted_variant_is_explicit(self, sample_market_df):
+        result = compute_0amv(
+            sample_market_df,
+            fit_level="lite",
+            formula_variant=FormulaVariant.PRICE_ADJUSTED,
+        )
+        assert result["0amv_close"].iloc[:5].isna().all()
+
     def test_life_line_smoother_than_close(self, sample_market_df):
         """生命线（EMA 12）应该比 0AMV_close 平滑。"""
         result = compute_0amv(sample_market_df, fit_level="standard")
@@ -192,6 +208,13 @@ class TestCompute0AMV:
             valid = result[col].dropna()
             assert len(valid) > 0, f"{col} 全 NaN"
             assert valid.std() > 0, f"{col} std 为 0"
+
+    def test_full_cost_lines_smooth_var1_not_raw_amount(self, sample_market_df):
+        result = compute_0amv(sample_market_df, fit_level="full")
+        var1 = sma(sample_market_df["amount"], n=10, m=1) / 1e7
+        nested = sma(var1, n=3, m=1)
+        assert result["0amv_c5"].iloc[0] == nested.iloc[0]
+        assert result["0amv_c5"].iloc[1] != sma(sample_market_df["amount"], n=3, m=1).iloc[1] / 1e7
 
     def test_color_consistency(self, sample_market_df):
         """color=1 时 close >= open。"""
@@ -242,10 +265,7 @@ class TestEdgeCases:
         assert len(result) == 0
 
     def test_short_df(self):
-        """少于 10 天的数据，SMA 还没收敛。应该能跑，不报错。
-
-        期望: 前 5 天 0amv_close 是 NaN (因为 ref_ma 需要 5 天历史)。
-        """
+        """少于 10 天的数据也应能按递推 SMA 计算。"""
         df = pd.DataFrame(
             {
                 "open": [3000.0] * 5,
@@ -260,7 +280,7 @@ class TestEdgeCases:
         )
         result = compute_0amv(df, fit_level="lite")
         assert len(result) == 5
-        # 短数据应该能跑，输出 5 行；具体值可能 NaN 是符合预期的
+        assert result["0amv_close"].notna().all()
         assert all(col in result.columns for col in ["0amv_close", "0amv_life_line", "0amv_change_pct"])
 
     def test_missing_columns(self):
@@ -303,11 +323,10 @@ class TestQlibExpressions:
             assert not unknown, f"{name} 引用了未知字段: {unknown}"
 
     def test_close_uses_correct_formula(self):
-        """核心公式应该是 EMA($amount, 19) * $close / MA(REF, 5) / 1e7"""
+        """核心公式应该是 EMA($amount, 19) / 1e7。"""
         expr = QLIB_EXPRESSIONS["0amv_close"]
         assert "EMA($amount, 19)" in expr
-        assert "$close" in expr
-        assert "Mean(Ref($close, 1), 5)" in expr
+        assert "$close" not in expr
         assert "1e7" in expr
 
 
@@ -320,13 +339,14 @@ class TestHandComputed:
 
     def test_hand_compute_close(self, sample_market_df):
         df = sample_market_df.copy()
-        # 手算：使用默认 scale_factor = 0.0042
         smooth = sma(df["amount"], n=10, m=1)
-        ref_ma = ma_ref(df["close"], n=5)
         result = compute_0amv(df, fit_level="lite")
-        # 第一天 ref_ma 是 NaN (因为 shift(1) 后 rolling(5) 缺数据)
-        assert math.isnan(result["0amv_close"].iloc[0])
-        # 第一个有 ref_ma 的日子 (index=5)
-        expected = smooth.iloc[5] * df["close"].iloc[5] / ref_ma.iloc[5] * 0.0042 / 1e7
+        expected = smooth.iloc[5] / 1e7
         actual = result["0amv_close"].iloc[5]
         assert math.isclose(actual, expected, rel_tol=1e-9)
+
+    def test_calibrate_scale_uses_median_ratio(self):
+        dates = pd.date_range("2024-01-01", periods=3)
+        proxy = pd.Series([10.0, 20.0, 30.0], index=dates)
+        truth = pd.Series([20.0, 40.0, 90.0], index=dates)
+        assert calibrate_scale(proxy, truth) == 2.0

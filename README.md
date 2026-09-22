@@ -1,169 +1,193 @@
-# 0AMV（活跃市值 / 活筹指数）—— 指南针软件公式近似实现
+# 0AMV 活跃市值指标民间公式研究
 
-> 写在最前面：**网上不是没有这个公式**——是你搜的关键词不对。0AMV 在
-> 通达信 / 同花顺 / 飞狐 都有民间仿制版，叫「**活筹指数**」。MBA 智库
-> 百科、东方财富博客、百度文库、文档下载网、koo8 / gpxiazai 等独立
-> 来源交叉验证下来，**核心公式完全一致**。本仓库把这套民间公式整理成
-> 可直接集成进量化系统的 Python + qlib 实现。
+本项目整理并实现公开流传的 0AMV（活跃市值／活筹指数）公式，提供 Python 计算、qlib 表达式以及基于真实沪深市场成交额的复现工具。
 
-## 文件清单
+> [!IMPORTANT]
+> 指南针官方公开了 0AMV 的指标含义，但未公开计算方法。本项目输出的是民间公式构造的**成交额代理指标**，不是经过官方确认的指南针原版，也不能解释为真实活跃筹码市值。
 
-```
-0amv/
-├── zero_amv.py                 # 核心实现 (pandas + numpy, 无 qlib 依赖)
-├── test_zero_amv.py            # 25 个单元测试 (pytest, 全部通过)
-├── trading_analyze_integration.py  # 集成到 TradingAnalyze 的代码片段
-└── README.md                   # 本文件
-```
+## 研究状态
 
-## 0AMV 是什么
+| 项目 | 状态 | 说明 |
+|---|---|---|
+| 民间公式实现 | 已完成 | 支持成交额公式与价格调整公式两种口径 |
+| 全市场数据复现 | 已完成 | 使用上证指数与深证综指的真实成交额聚合 |
+| 同日期截图对照 | 已完成 | 复现窗口与 2024 年指南针截图一致 |
+| 原版数值误差评估 | 暂不可用 | 缺少连续、可机器读取的指南针原版序列 |
+| 0DMV 推导 | 不支持 | 民间成交额代理不满足 `0AMV + 0DMV = 流通市值` |
 
-| 名称 | 含义 |
-|---|---|
-| **0 号指数** | 沪深 A 股流通市值总和（市场总规模） |
-| **0AMV（活跃市值 / 活筹）** | 短期交易活跃的筹码总市值，反映「市场里活的钱」 |
-| **0DMV（死筹）** | 长期锁定不交易的筹码市值，反映「被锁住的钱」 |
-| **关系** | 0 号指数 ≈ 0AMV + 0DMV（仿制版里**不严格**成立） |
+## 核心公式
 
-指南针软件（沈阳指南针）的私有指标，官方不公开算法。民间复刻的核心
-公式是：
+默认使用公开资料中明确标为 0AMV／活筹指数的成交额公式：
 
-```
-0AMV_close = SMA(AMOUNT, 10, 1) × CLOSE / MA(REF(CLOSE, 1), 5) / 1e7
-```
+```text
+VAR1 = SMA(全市场 AMOUNT, 10, 1) / 1e7
 
-含义：把全市场 10 日平滑成交额 × 当前价 / 5 日均价 / 千万，得到一个
-「相对资金规模」指标。它和真实活跃市值**有相关但不相等**。
+close = VAR1
+open  = REF(VAR1, 1)
 
-## 三个层级的拟合
-
-| 层级 | 函数 | 内容 | 拟合度 |
-|---|---|---|---|
-| **Lite** | `compute_0amv(df, "lite")` | 0AMV 收盘 + 生命线 | ★★ |
-| **Standard** | `compute_0amv(df, "standard")` | 0AMV 完整 K 线（开/高/低/收）+ 生命线 + 颜色 | ★★★★ |
-| **Full** | `compute_0amv(df, "full")` | Standard + C5/C13/C34/∞ 活筹成本均线 | ★★★★★ |
-
-**建议**：日常看大盘资金用 **Standard**；做量化策略用 **Full**（多
-4 条均线出信号更稳）。
-
-## 快速上手
-
-```python
-import pandas as pd
-from zero_amv import compute_0amv, FitLevel
-
-# df 必须有 [open, high, low, close, amount, volume, capital] 列
-# amount: 元（Tushare 默认）
-# volume/capital: 股（Tushare 默认）
-# 索引: DatetimeIndex
-
-# 全市场版本（默认）
-df_market = pd.DataFrame({
-    "open": ..., "high": ..., "low": ..., "close": ...,
-    "amount": ...,     # 当日全市场成交额
-    "volume": ...,     # 当日全市场成交量
-    "capital": ...,    # 当日全市场流通股本
-}, index=pd.date_range(...))
-
-result = compute_0amv(df_market, fit_level=FitLevel.FULL)
-# result 列: 0amv_open/high/low/close, 0amv_life_line, 0amv_color,
-#           0amv_c5/c13/c34/infinite, 0amv_change_pct
+C5  = DMA(SMA(VAR1, 3, 1), VOL / 0.02 / CAPITAL)
+C13 = DMA(SMA(VAR1, 3, 1), VOL / 0.10 / CAPITAL)
+C34 = DMA(SMA(VAR1, 3, 1), VOL / 0.18 / CAPITAL)
+C∞  = DMA(VAR1, VOL / 1.10 / CAPITAL)
 ```
 
-### 个股版 0AMV
+其中：
 
-直接把 `df` 换成单只股票的 daily bar 即可。公式不变，但**含义**从
-「全市场活跃资金规模」变成「这只股票的资金流量折算」。
+- `AMOUNT` 为沪深全市场每日成交额，单位为元；
+- `VOL` 与 `CAPITAL` 必须采用一致的股数单位；
+- `SMA(X, N, 1)` 为通达信递推平滑，不是简单移动平均；
+- `DMA(X, A)` 为动态移动平均，权重由换手率决定。
 
-## 信号系统（仿指南针用法）
+公开资料中还存在以下价格调整版本：
 
-1. **0AMV 在生命线上方运行 + K 线走高** → 红色区域，资金流入
-2. **0AMV 在生命线下方运行 + K 线走低** → 绿色区域，资金流出
-3. **C5 上穿 C13** → 短线资金加速流入
-4. **C13 上穿 C34** → 中期资金加仓
-5. **0 号指数上升 + 0AMV 下降** → 牛背离，大盘即将到顶
-6. **0 号指数下降 + 0AMV 上升** → 熊背离，大盘即将到底
+```text
+SMA(AMOUNT, 10, 1) × CLOSE / MA(REF(CLOSE, 1), 5) / 1e7
+```
 
-## 拟合度说明
+该版本在本项目中以 `formula_variant="price_adjusted"` 显式保留，不作为默认 0AMV 口径。
 
-| 民间公式 vs 指南针原版 | 差异 |
-|---|---|
-| 核心公式（SMA/EMA/MA 部分） | **完全一致**（多个独立来源交叉验证） |
-| 单位归一化（×1e7） | 拟合，指南针原版 K 线数值范围是 [0, 几万亿]，仿版用千万 |
-| 0DMV（死筹） | **不在仿制版**——需要真实换手率活跃度数据，民间公式无法给出 |
-| 5 日成本均线信号 | 一致 |
-| 立体 K 线（指南针特色） | 不在仿制版 |
+## 环境准备
 
-**结论**：核心信号（方向/趋势/背离/均线交叉）拟合度 95%+，绝对数
-值拟合度 ~80%（指南针可能用了不同单位/不同股票池）。
-
-## 集成到 TradingAnalyze
-
-按 `trading_analyze_integration.py` 里的代码片段，走 7 步 PR 流程：
-
-1. `git checkout -b feat/0amv-active-mkt-cap-factor`
-2. 把 `PATCH_START` / `PATCH_END` 之间的代码粘进
-   `src/trading_analyze/factor_mining/factors/technical_factors.py`
-3. 把 `TEST_START` / `TEST_END` 之间的代码粘进对应测试文件
-4. 改 `CHANGELOG.md`
-5. `poetry run ruff check && poetry run black --check && poetry run mypy && poetry run pytest`
-6. `git commit` + `git push` + `gh pr create --fill --base main`
-7. 盯 `gh run watch --exit-status`，red 修，最多 3 次
-
-**为什么不直接动手改**：TradingAnalyze 的 AGENTS.md 明确禁止直接
-push main，强制走 PR 流程。本仓库不破坏这条规则。
-
-## 测试
+项目要求 Python 3.10 或更高版本。核心计算依赖 `numpy` 和 `pandas`；图表复现与测试还需要 `matplotlib`、`Pillow` 和 `pytest`。
 
 ```bash
-cd /Users/wdblink/Research/trade/0amv
-python3.11 -m pytest test_zero_amv.py -v
-# 25 passed in 0.21s
+git clone https://github.com/WdBlink/compass-0amv-imitate.git
+cd compass-0amv-imitate
+
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install numpy pandas matplotlib pillow pytest
 ```
 
-测试覆盖：
-- SMA / EMA / MA(REF) 数学函数正确性（手算对照）
-- 三个层级的输出 schema 正确性
-- 0AMV 收盘价为正、生命线 std < close std、K 线颜色信号 0/1 等不变量
-- 边界情况（空 df / 短 df / 缺列 / 非法 fit_level）
-- qlib 表达式字段引用合法性
-- **反向断言**：仿制版**不**提供 0DMV（避免未来误加）
+## 快速开始
 
-## 参考资料（民间来源，多源交叉验证）
+以下示例下载指定窗口的沪深市场成交额，并计算标准版 0AMV 代理指标：
 
-- MBA 智库百科「活筹指数」词条（重定向自「活跃市值指数」）
-- 道客巴巴「指南针经典指标之 0AMV」PDF
-- 东方财富网「指南针 0AMV 活筹指数」教学博客（2009）
-- 百度文库「0amv 指数源代码 [教学]」
-- 豆丁网「指南针指标源码」28 个公式集
-- 公式网 gpxiazai.com「指南针的 0amv 活跃市值转成通达信指标」
-- 同花顺 / 通达信 / 飞狐 仿制版源码（多个变体）
+```python
+from validation.market_data import load_mainland_market_amount
+from zero_amv import compute_0amv
 
-## 不变量警告（重要）
+market = load_mainland_market_amount("2024-01-01", "2024-10-10")
+result = compute_0amv(market[["amount"]], fit_level="standard")
 
-```
-0AMV + 0DMV = 流通市值
+print(result.tail())
 ```
 
-这个不变量**只在指南针原版成立**。民间仿制版：
+如果已经准备好自己的全市场数据：
 
-- 0AMV = 相对资金规模（千万 RMB 单位，无绝对含义）
-- 0DMV 不在仿制版中（民间公式无法计算）
-- 应该看 0AMV 的**变化方向**和**K 线形态**，不要把数值当绝对量用
+```python
+from zero_amv import compute_0amv
 
-如果用户在你的量化系统里问「这个 0AMV 数值 800 是什么意思」，正确
-的回答是：**没有绝对含义，看它和昨天的对比，以及它的趋势**。
+# Lite / Standard：仅要求 amount（元）
+standard = compute_0amv(df[["amount"]], fit_level="standard")
 
-## 后续可做（如果想逼近 100% 拟合）
+# Full：额外要求同口径的 volume（股）与 capital（股）
+full = compute_0amv(
+    df[["amount", "volume", "capital"]],
+    fit_level="full",
+)
+```
 
-1. 接入 Tushare 沪深全 A 数据，下载 amount/volume/capital，用本模块直接跑
-2. 跑 100 天结果，截图对比「指南针软件 vs 仿版」的 K 线，肉眼检查趋势一致性
-3. 想要 0DMV，需要先有「个股过去 30 日换手率活跃度」分类（指南针私有逻辑），
-   民间复刻的近似是「0DMV ≈ 流通市值 × (1 - 近 30 日日均换手率 / 平均换手率)」，
-   拟合度 ~70%
-4. 想要绝对数值校准，需要找到一段指南针软件公开的 0AMV 截图，反推它
-   用的全市场 amount 是「沪深 A 股」还是「沪深 300」还是「等权指数」
+### 输出字段
+
+| 层级 | 字段 | 含义 |
+|---|---|---|
+| Lite | `0amv_close` | 十日递推平滑后的全市场成交额代理 |
+| Lite | `0amv_life_line` | `0amv_close` 的 EMA12 平滑线 |
+| Lite | `0amv_change_pct` | 代理指标日变化率（百分比） |
+| Standard | `0amv_open/high/low` | 由当日值与前一日值构造的绘图区间 |
+| Standard | `0amv_color` | 上升为 1，下降为 0，无法判断为缺失值 |
+| Full | `0amv_c5/c13/c34/infinite` | 公开民间公式中的换手率动态均线 |
+
+### 公式口径参数
+
+```python
+from zero_amv import FormulaVariant, compute_0amv
+
+legacy = compute_0amv(
+    df,
+    formula_variant=FormulaVariant.PRICE_ADJUSTED,
+    fit_level="standard",
+)
+```
+
+`scale_factor` 默认值为 `1.0`。只有获得同日期、连续的指南针导出值后，才应使用 `calibrate_scale(proxy, ground_truth)` 标定；截图十字光标标签不能作为收盘真值。
+
+## 数据与验证
+
+验证脚本通过东方财富历史日线接口分别获取上证指数和深证综指成交额，再按交易日求和。原始分市场列 `sh_amount`、`sz_amount` 会保留在 DataFrame 中，便于审计聚合口径。
+
+```bash
+# 运行全部测试
+python -m pytest -q
+
+# 生成与 2024 年原版截图相同时间窗口的并排对照图
+python validation/make_side_by_side.py
+
+# 生成最近窗口的指标图
+python validation/render_imitate_kline.py
+
+# 重新计算多空区间及其独立评估指标
+python validation/detect_regimes.py
+```
+
+### 同窗口形态对照
+
+![0AMV 民间公式与指南针截图的同窗口对照](validation/output/side_by_side_compare.png)
+
+该图可以检查大体方向和拐点是否相似，但不能据此计算相关系数或绝对误差：截图中的红色日期与数值标签来自十字光标，且没有可导出的逐日原始值。
+
+### 多空区间评估
+
+多空区间检测是建立在 0AMV 代理之上的独立规则系统，不等同于公式拟合度。当前真实成交额复现结果为：
+
+| 指标 | 结果 |
+|---|---:|
+| 事件 Precision | 58.3% |
+| 事件 Recall | 53.8% |
+| 事件 F1 | 56.0% |
+| 逐日 F1 | 51.9% |
+| 逐日 IoU | 35.0% |
+
+事件评分采用一对一匹配，避免一段超长预测区间同时命中多个真实区间。结果用于评估当前阈值和状态机，不应表述为“0AMV 拟合准确率”。
+
+## qlib 集成
+
+`QLIB_EXPRESSIONS` 与 `trading_analyze_integration.py` 提供了成交额公式的 qlib 表达式。需要特别注意：普通单股票 instrument 的 `$amount` 只是个股成交额；只有输入本身是预先聚合的全市场序列时，这些表达式才具有 0AMV 代理含义。
+
+## 项目结构
+
+```text
+.
+├── zero_amv.py                       # 核心计算与 qlib 表达式
+├── trading_analyze_integration.py    # TradingAnalyze / qlib 集成片段
+├── test_zero_amv.py                  # 核心公式测试
+├── test_regime_evaluation.py         # 区间评分测试
+└── validation/
+    ├── market_data.py                # 沪深市场成交额下载与聚合
+    ├── make_side_by_side.py          # 同日期窗口截图对照
+    ├── render_imitate_kline.py       # 指标图渲染
+    ├── detect_regimes.py             # 多空区间状态机及评估
+    └── output/                        # 可复现输出
+```
+
+## 已知限制
+
+1. 指南针原版算法属于未公开实现，本项目只能验证公开民间公式。
+2. 当前截图不足以提供逐日真值，因此不报告相关系数、MAE、MAPE 或所谓“拟合度 95%”。
+3. 上证指数与深证综指成交额之和是可复现的全市场代理，但仍可能与指南针历史股票池和数据清洗口径不同。
+4. 将单只股票数据代入只能得到个股成交额代理，不能称为大盘活跃市值。
+5. 本项目不构成投资建议，也不应用于直接生成实盘交易指令。
+
+进一步提高精度需要连续的指南针 0AMV 原始序列。取得数据后，应预先固定训练集和样本外窗口，并报告方向一致率、相关系数、MAE/MAPE 以及不同市场阶段的稳定性。
+
+## 参考资料与数据来源
+
+- [北京指南针：经典指标之 0AMV](https://www.compass.cn/shownews.php?nid=1976015)——官方指标含义与使用说明，未公开算法。
+- [公式网：指南针的 0AMV 活跃市值转成通达信指标](https://www.gpxiazai.com/gpgs/html/36759.html)——成交额版本民间公式来源之一。
+- [同花顺公式平台：OAMV 活筹指数](https://poi.10jqka.com.cn/store/formula/detail/indexid/68942)——另一份公开民间实现，用于核对公式分歧。
+- [东方财富：上证指数](https://quote.eastmoney.com/zs000001.html)与[深证综指](https://quote.eastmoney.com/zs399106.html)——验证脚本的数据来源。
 
 ## License
 
-民间复刻 / 公开源码学习整理，无专利风险。
+本项目采用 [MIT License](LICENSE)。公开民间公式与第三方数据的使用仍应遵守各自来源的条款。
