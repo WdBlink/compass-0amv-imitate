@@ -65,6 +65,31 @@ def number(value: object) -> Decimal:
     return result
 
 
+def request_key(endpoint: str, selector: str, params: dict) -> str:
+    """Bind the fixed snapshot scope before collecting or replaying any response."""
+    if endpoint in ("daily", "daily_basic", "adj_factor"):
+        if not START <= valid_date(selector) <= END:
+            raise ValueError("request date outside snapshot range")
+        expected = {"trade_date": selector}
+    elif endpoint == "stock_basic" and selector in ("L", "D", "P"):
+        expected = {"list_status": selector}
+    elif endpoint == "trade_cal" and selector in ("SSE", "SZSE"):
+        expected = {"exchange": selector, "start_date": START, "end_date": END}
+    else:
+        raise ValueError("unsupported endpoint or selector")
+    if params != expected:
+        raise ValueError("request selector/params mismatch or restricted scope")
+    return f"{endpoint}/{selector}"
+
+
+def validate_group_request(key: str, group: dict) -> None:
+    parts = key.split("/")
+    if len(parts) != 2 or parts[0] != group["endpoint"]:
+        raise ValueError("group key/endpoint mismatch")
+    if request_key(group["endpoint"], parts[1], group["params"]) != key:
+        raise ValueError("group request mismatch")
+
+
 def row_key(endpoint: str, row: dict) -> tuple:
     if endpoint == "trade_cal":
         return row["exchange"], row["cal_date"]
@@ -96,6 +121,7 @@ def parse_response(raw: bytes, endpoint: str, params: dict) -> list[dict]:
                 raise ValueError("calendar request mismatch")
             if isinstance(row["is_open"], bool) or row["is_open"] not in (0, 1, "0", "1"):
                 raise ValueError("invalid calendar open flag")
+            row["is_open"] = int(row["is_open"])
             if row["pretrade_date"] is not None:
                 valid_date(row["pretrade_date"])
         else:
@@ -227,6 +253,9 @@ class Collector:
                 continue
             params = {k: v for k, v in receipt["params"].items() if k not in {"limit", "offset", "ts_type_name"}}
             selector = params.get("trade_date", params.get("list_status", params.get("exchange")))
+            key = request_key(endpoint, selector, params)
+            group = self.manifest["groups"][key]
+            validate_group_request(key, group)
             raw = (self.root / receipt["response_file"]).read_bytes()
             if digest(raw) != receipt["sha256"]:
                 raise ValueError("saved failure hash mismatch")
@@ -234,7 +263,6 @@ class Collector:
                 rows = parse_response(raw, endpoint, params)
             except ValueError:
                 continue
-            group = self.manifest["groups"][f"{endpoint}/{selector}"]
             if group["pages"] or receipt["params"]["offset"] != 0 or len(rows) >= CAP:
                 continue
             group.update(status="complete", rows=len(rows), pages=[{
@@ -244,9 +272,10 @@ class Collector:
             save_manifest(self.root, self.manifest)
 
     def get(self, endpoint: str, selector: str, params: dict) -> list[dict] | None:
-        group_key = f"{endpoint}/{selector}"
+        group_key = request_key(endpoint, selector, params)
         groups = self.manifest["groups"]
-        group = groups.setdefault(group_key, {"endpoint": endpoint, "params": params, "pages": [], "status": "partial"})
+        group = groups.setdefault(group_key, {"endpoint": endpoint, "params": dict(params), "pages": [], "status": "partial"})
+        validate_group_request(group_key, group)
         if group["status"] == "complete":
             return load_group(self.root, self.manifest, group_key)
         if endpoint in self.manifest["blocked_endpoints"]:
@@ -326,6 +355,7 @@ def read_page(root: Path, endpoint: str, params: dict, page: dict) -> list[dict]
 
 def load_group(root: Path, manifest: dict, key: str) -> list[dict]:
     group = manifest["groups"][key]
+    validate_group_request(key, group)
     if group["status"] != "complete":
         raise ValueError("partial endpoint group")
     offset = 0
@@ -348,6 +378,8 @@ def load_daily_panel(root: Path, day: str) -> list[dict]:
                                  for endpoint in ("daily", "daily_basic", "adj_factor")]
     except KeyError:
         raise ValueError("missing endpoint group") from None
+    if any(row["trade_date"] != day for rows in (daily, basic, factors) for row in rows):
+        raise ValueError("panel trade date request mismatch")
     report = audit_day(daily, basic, factors, [], day)
     if not report["numeric_panel_valid"]:
         raise ValueError("invalid numerical panel: bounds or cross-endpoint keys/close")
@@ -361,6 +393,8 @@ def audit_snapshot(root: Path) -> dict:
     manifest_raw = (root / "manifest.json").read_bytes()
     manifest = json.loads(manifest_raw)
     groups = manifest["groups"]
+    for key, group in groups.items():
+        validate_group_request(key, group)
     metadata = [r for state in "LDP" if groups.get(f"stock_basic/{state}", {}).get("status") == "complete"
                 for r in load_group(root, manifest, f"stock_basic/{state}")]
     if len(metadata) != len({r["ts_code"] for r in metadata}):
@@ -374,7 +408,7 @@ def audit_snapshot(root: Path) -> dict:
             rows = load_group(root, manifest, key)
             calendar_coverage[exchange] = len(rows)
             calendar_missing[exchange] = sorted(expected_calendar - {r["cal_date"] for r in rows})
-            calendar_open_dates[exchange] = {r["cal_date"] for r in rows if str(r["is_open"]) == "1"}
+            calendar_open_dates[exchange] = {r["cal_date"] for r in rows if r["is_open"] == 1}
             expected_days.update(calendar_open_dates[exchange])
     available = {endpoint: sorted(key.split("/")[1] for key, group in groups.items()
                                 if group["endpoint"] == endpoint and group["status"] == "complete")
@@ -418,7 +452,7 @@ def main() -> int:
             if not (root / "pilot-audit.json").exists():
                 raise ValueError("run and inspect pilot before continuation")
             calendars = [load_group(root, collector.manifest, f"trade_cal/{ex}") for ex in ("SSE", "SZSE")]
-            dates = sorted({r["cal_date"] for rows in calendars for r in rows if str(r["is_open"]) == "1"})
+            dates = sorted({r["cal_date"] for rows in calendars for r in rows if r["is_open"] == 1})
             for day in dates:
                 for endpoint in ("daily", "daily_basic", "adj_factor"):
                     collector.get(endpoint, day, {"trade_date": day})

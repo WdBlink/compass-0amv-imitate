@@ -1,4 +1,7 @@
 import json
+import datetime as dt
+import sys
+from copy import deepcopy
 from decimal import Decimal
 
 import pytest
@@ -174,3 +177,227 @@ def test_loader_checks_pagination_offsets(tmp_path):
                  pages=[{"offset": 6000, "rows": 1}], rows=1)
     with pytest.raises(ValueError, match="offset"):
         m.load_group(tmp_path, {"groups": {"daily/20261030": group}}, "daily/20261030")
+
+
+def panel_rows(day):
+    return {
+        "daily": [daily(trade_date=day)],
+        "daily_basic": [dict(ts_code="000001.SZ", trade_date=day, close=11, turnover_rate=1,
+                             total_share=100, float_share=50, free_share=40, total_mv=1100, circ_mv=550)],
+        "adj_factor": [dict(ts_code="000001.SZ", trade_date=day, adj_factor=2)],
+    }
+
+
+@pytest.fixture
+def offline_collector(tmp_path, monkeypatch):
+    class Response:
+        status = 200
+
+        def __init__(self, raw):
+            self.raw = raw
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self, size):
+            return self.raw[:size]
+
+    class Opener:
+        def __init__(self):
+            self.calls = []
+            self.responses = {}
+
+        def open(self, request, timeout):
+            body = json.loads(request.data)
+            endpoint, params = body["api_name"], body["params"]
+            self.calls.append((endpoint, params))
+            selector = params.get("trade_date", params.get("exchange", params.get("list_status")))
+            raw = self.responses.get((endpoint, selector))
+            if raw is None:
+                raw = payload(endpoint, panel_rows(selector)[endpoint])
+            return Response(raw)
+
+    opener = Opener()
+    monkeypatch.setenv("TUSHARE_TOKEN", "test-only-value")
+    monkeypatch.setattr(m.time, "sleep", lambda _: None)
+    monkeypatch.setattr(m.urllib.request, "build_opener", lambda *_: opener)
+    return m.Collector(tmp_path), opener
+
+
+def collect_panel(collector, day):
+    for endpoint in ("daily", "daily_basic", "adj_factor"):
+        assert collector.get(endpoint, day, {"trade_date": day}) is not None
+
+
+def test_collector_to_strict_panel_keeps_units_and_raw_date(offline_collector, tmp_path):
+    collector, opener = offline_collector
+    collect_panel(collector, m.END)
+    assert len(opener.calls) == 3
+    assert len(list((tmp_path / "raw").iterdir())) == 3
+    assert m.load_daily_panel(tmp_path, m.END) == [dict(
+        symbol="000001.SZ", date=m.END, raw_close=Decimal(11), volume_shares=Decimal(10000),
+        amount_cny=Decimal(105000), total_share=Decimal(1000000), float_share=Decimal(500000),
+        free_share=Decimal(400000), total_mv=Decimal(11000000), circ_mv=Decimal(5500000), adj_factor=Decimal(2))]
+
+
+@pytest.mark.parametrize("endpoint,selector,params", [
+    ("daily", "20261029", {"trade_date": m.END}),
+    ("daily_basic", m.END, {"trade_date": m.END, "ts_code": "000001.SZ"}),
+    ("adj_factor", m.END, {}),
+    ("daily", "20260430", {"trade_date": "20260430"}),
+    ("stock_basic", "L", {"list_status": "D"}),
+    ("stock_basic", "L", {"list_status": "L", "exchange": "SSE"}),
+    ("trade_cal", "SSE", {"exchange": "SZSE", "start_date": m.START, "end_date": m.END}),
+    ("trade_cal", "SSE", {"exchange": "SSE", "start_date": m.END, "end_date": m.END}),
+    ("unknown", m.END, {"trade_date": m.END}),
+])
+def test_collector_rejects_selector_and_restricted_scope_before_request(offline_collector, endpoint, selector, params):
+    collector, opener = offline_collector
+    with pytest.raises(ValueError):
+        collector.get(endpoint, selector, params)
+    assert opener.calls == []
+    assert collector.manifest["groups"] == {}
+
+
+@pytest.mark.parametrize("change", ["key", "endpoint", "params", "scope"])
+def test_manifest_request_binding_rejects_unchanged_raw(offline_collector, tmp_path, change):
+    collector, opener = offline_collector
+    collect_panel(collector, m.END)
+    original_raw = {p.name: p.read_bytes() for p in (tmp_path / "raw").iterdir()}
+    original_pages = deepcopy([g["pages"] for g in collector.manifest["groups"].values()])
+    groups = collector.manifest["groups"]
+    day = m.END
+    if change == "key":
+        day = "20261029"
+        collector.manifest["groups"] = {key.replace(m.END, day): value for key, value in groups.items()}
+    elif change == "endpoint":
+        groups[f"daily/{day}"]["endpoint"] = "daily_basic"
+    elif change == "params":
+        groups[f"daily/{day}"]["params"]["trade_date"] = "20261029"
+    else:
+        groups[f"daily/{day}"]["params"]["ts_code"] = "000001.SZ"
+    m.save_manifest(tmp_path, collector.manifest)
+    with pytest.raises(ValueError, match="mismatch|scope"):
+        m.load_daily_panel(tmp_path, day)
+    with pytest.raises(ValueError, match="mismatch|scope"):
+        m.audit_snapshot(tmp_path)
+    with pytest.raises(ValueError, match="mismatch|scope"):
+        collector.get("daily", day, {"trade_date": day})
+    assert len(opener.calls) == 3
+    assert original_raw == {p.name: p.read_bytes() for p in (tmp_path / "raw").iterdir()}
+    assert original_pages == [g["pages"] for g in collector.manifest["groups"].values()]
+
+
+@pytest.mark.parametrize("endpoint", ["daily", "daily_basic", "adj_factor"])
+def test_wrong_date_in_any_endpoint_is_rejected_before_join(offline_collector, tmp_path, endpoint):
+    collector, _ = offline_collector
+    collect_panel(collector, m.END)
+    group = collector.manifest["groups"][f"{endpoint}/{m.END}"]
+    page = group["pages"][0]
+    rows = panel_rows(m.END)[endpoint] + [dict(panel_rows("20261029")[endpoint][0], ts_code="600000.SH")]
+    raw = payload(endpoint, rows)
+    (tmp_path / page["file"]).write_bytes(raw)
+    page.update(sha256=m.digest(raw), rows=2)
+    group["rows"] = 2
+    m.save_manifest(tmp_path, collector.manifest)
+    with pytest.raises(ValueError, match="trade date request mismatch"):
+        m.load_daily_panel(tmp_path, m.END)
+
+
+@pytest.mark.parametrize("failure", ["missing_file", "missing_endpoint", "partial", "reordered", "duplicate", "corrupt"])
+def test_collected_panel_retains_fail_closed_replay(offline_collector, tmp_path, failure):
+    collector, _ = offline_collector
+    collect_panel(collector, m.END)
+    group = collector.manifest["groups"][f"daily/{m.END}"]
+    page = group["pages"][0]
+    path = tmp_path / page["file"]
+    if failure == "missing_file":
+        path.unlink()
+    elif failure == "missing_endpoint":
+        del collector.manifest["groups"][f"daily_basic/{m.END}"]
+    elif failure == "partial":
+        group["status"] = "partial"
+    elif failure == "reordered":
+        page["offset"] = 6000
+    elif failure == "duplicate":
+        raw = payload("daily", [daily(), daily()])
+        path.write_bytes(raw)
+        page.update(sha256=m.digest(raw), rows=2)
+        group["rows"] = 2
+    else:
+        path.write_bytes(path.read_bytes() + b" ")
+    m.save_manifest(tmp_path, collector.manifest)
+    with pytest.raises((ValueError, FileNotFoundError)):
+        m.load_daily_panel(tmp_path, m.END)
+
+
+@pytest.mark.parametrize("flag,expected", [(1, 1), (1.0, 1), ("1", 1), (0, 0), (0.0, 0), ("0", 0)])
+def test_calendar_flags_audit_and_continue_use_same_open_days(offline_collector, tmp_path, monkeypatch, flag, expected):
+    collector, opener = offline_collector
+    first = dt.datetime.strptime(m.START, "%Y%m%d").date()
+    last = dt.datetime.strptime(m.END, "%Y%m%d").date()
+    days = [(first + dt.timedelta(days=i)).strftime("%Y%m%d") for i in range((last - first).days + 1)]
+    flags = []
+    for exchange in ("SSE", "SZSE"):
+        rows = [dict(exchange=exchange, cal_date=day, is_open=flag if day == m.END else 0,
+                     pretrade_date="20260430") for day in days]
+        opener.responses[("trade_cal", exchange)] = payload("trade_cal", rows)
+        result = collector.get("trade_cal", exchange,
+                               {"exchange": exchange, "start_date": m.START, "end_date": m.END})
+        flags.extend([result[-1]["is_open"],
+                      m.load_group(tmp_path, collector.manifest, f"trade_cal/{exchange}")[-1]["is_open"]])
+    report = m.audit_snapshot(tmp_path)
+    requested = [m.END] if expected else []
+    assert report["calendar_missing_dates"] == {"SSE": [], "SZSE": []}
+    assert report["expected_open_days"] == requested
+    assert report["missing_requested_dates"] == {e: requested for e in ("daily", "daily_basic", "adj_factor")}
+    assert report["actual_endpoint_dates"] == {e: [] for e in ("daily", "daily_basic", "adj_factor")}
+    assert all(type(value) is int and value == expected for value in flags)
+    (tmp_path / "pilot-audit.json").write_text(json.dumps(report))
+    monkeypatch.setattr(sys, "argv", ["market_snapshot", "continue", "--root", str(tmp_path)])
+    assert m.main() == 0
+    assert [(endpoint, params["trade_date"]) for endpoint, params in opener.calls[2:]] == [
+        (endpoint, m.END) for endpoint in ("daily", "daily_basic", "adj_factor") if expected]
+    after = json.loads((tmp_path / "coverage-audit.json").read_text())
+    assert after["expected_open_days"] == requested
+    assert all(not missing for missing in after["missing_requested_dates"].values())
+
+
+@pytest.mark.parametrize("flag", [True, False, 2, -1, 0.5, "1.0", "yes", None])
+def test_invalid_calendar_flag_blocks_replay_and_continuation(offline_collector, tmp_path, monkeypatch, flag):
+    collector, opener = offline_collector
+    row = dict(exchange="SSE", cal_date=m.END, is_open=flag, pretrade_date="20261029")
+    opener.responses[("trade_cal", "SSE")] = payload("trade_cal", [row])
+    assert collector.get("trade_cal", "SSE", {"exchange": "SSE", "start_date": m.START, "end_date": m.END}) is None
+    assert collector.manifest["groups"]["trade_cal/SSE"]["status"] == "partial"
+    assert len(list((tmp_path / "raw").iterdir())) == 1
+    with pytest.raises(ValueError, match="partial"):
+        m.load_group(tmp_path, collector.manifest, "trade_cal/SSE")
+    report = m.audit_snapshot(tmp_path)
+    assert report["blocked_endpoints"] == {"trade_cal": "ValueError"}
+    assert report["calendar_exchange_agreement"] is False
+    (tmp_path / "pilot-audit.json").write_text(json.dumps(report))
+    monkeypatch.setattr(sys, "argv", ["market_snapshot", "continue", "--root", str(tmp_path)])
+    with pytest.raises(ValueError, match="partial"):
+        m.main()
+    assert len(opener.calls) == 1
+
+
+def test_consumer_prefix_is_unchanged_by_future_tail_poison(offline_collector, tmp_path):
+    collector, _ = offline_collector
+    prefix_days = ["20261028", "20261029"]
+    for day in prefix_days:
+        collect_panel(collector, day)
+    prefix = [m.load_daily_panel(tmp_path, day) for day in prefix_days]
+    collect_panel(collector, m.END)
+    assert prefix == [m.load_daily_panel(tmp_path, day) for day in prefix_days]
+    for endpoint in ("daily", "daily_basic", "adj_factor"):
+        group = collector.manifest["groups"][f"{endpoint}/{m.END}"]
+        for page in group["pages"]:
+            (tmp_path / page["file"]).write_bytes(b"poisoned future input")
+    assert prefix == [m.load_daily_panel(tmp_path, day) for day in prefix_days]
+    with pytest.raises(ValueError, match="hash"):
+        m.load_daily_panel(tmp_path, m.END)
