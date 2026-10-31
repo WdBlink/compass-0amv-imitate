@@ -337,6 +337,21 @@ def run_cli(plan_path, packet_path, root):
     return report
 
 
+def test_cli_evidence_root_symlink_loop_has_no_trusted_denominator(synthetic):
+    plan, packet, root = synthetic
+    plan_path, packet_path = root / "plan.json", root / "packet.json"
+    plan_path.write_text(json.dumps(plan), encoding="utf-8")
+    packet_path.write_text(json.dumps(packet), encoding="utf-8")
+    evidence_root = root / "evidence-root"
+    evidence_root.symlink_to("loop-a")
+    (root / "loop-a").symlink_to("loop-b")
+    (root / "loop-b").symlink_to("loop-a")
+    report = run_cli(plan_path, packet_path, evidence_root)
+    assert "coverage" not in report and "cases" not in report
+    assert report["errors"] == ["evidence root cannot be resolved"]
+    assert str(root) not in json.dumps(report)
+
+
 @pytest.mark.parametrize("failure,cause", [
     ("duplicate_keys", "JSON contains duplicate object keys"),
     ("truncated_json", "Expecting value"),

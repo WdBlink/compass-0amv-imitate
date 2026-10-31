@@ -252,7 +252,10 @@ def _validate_plan(plan, evidence_root, *, as_of=None):
             if case[field] is not None:
                 _known_text(case[field], f"planned {field}")
         expected[key] = case
-    root = Path(evidence_root).resolve()
+    try:
+        root = Path(evidence_root).resolve()
+    except RuntimeError as exc:
+        raise ValueError("evidence root cannot be resolved") from exc
     if not root.is_dir():
         raise ValueError("evidence root must be a local directory")
     sources = {}
