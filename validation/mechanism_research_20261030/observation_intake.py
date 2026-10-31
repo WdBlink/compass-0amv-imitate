@@ -359,7 +359,10 @@ def _unique_object(pairs):
 
 def _load_json(filename):
     with Path(filename).open(encoding="utf-8") as stream:
-        return json.load(stream, object_pairs_hook=_unique_object)
+        try:
+            return json.load(stream, object_pairs_hook=_unique_object)
+        except RecursionError as exc:
+            raise ValueError("JSON nesting is too deep") from exc
 
 
 def main(argv=None):

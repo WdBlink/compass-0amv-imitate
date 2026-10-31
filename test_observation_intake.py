@@ -355,6 +355,7 @@ def test_cli_evidence_root_symlink_loop_has_no_trusted_denominator(synthetic):
 @pytest.mark.parametrize("failure,cause", [
     ("duplicate_keys", "JSON contains duplicate object keys"),
     ("truncated_json", "Expecting value"),
+    ("deeply_nested_json", "JSON nesting is too deep"),
     ("missing_file", "FileNotFoundError"),
     ("unreadable_file", "IsADirectoryError"),
     ("oversize_source", "File name too long"),
@@ -367,6 +368,8 @@ def test_cli_packet_failures_preserve_valid_plan(synthetic, failure, cause):
         packet_path.write_text('{"purpose":"contract_calibration","purpose":"blind_validation"}', encoding="utf-8")
     elif failure == "truncated_json":
         packet_path.write_text('{"observations": [', encoding="utf-8")
+    elif failure == "deeply_nested_json":
+        packet_path.write_text('{"observations":' + "[" * 1200 + "0" + "]" * 1200 + "}", encoding="utf-8")
     elif failure == "unreadable_file":
         packet_path.mkdir()
     elif failure == "oversize_source":
@@ -380,6 +383,9 @@ def test_cli_packet_failures_preserve_valid_plan(synthetic, failure, cause):
     assert {identity(row) for row in report["cases"]} == {identity(row) for row in plan["expected"]}
     assert all(row["usable"] is False for row in report["cases"])
     assert any(cause in error for error in report["errors"])
+    if failure == "deeply_nested_json":
+        assert report["errors"] == [cause]
+        assert all(row["reason"] == cause for row in report["cases"])
     if failure == "oversize_source":
         assert report["coverage"]["invalid"] == 1
         assert report["coverage"]["observed"] == 17
@@ -390,7 +396,8 @@ def test_cli_packet_failures_preserve_valid_plan(synthetic, failure, cause):
         assert report["coverage"]["observed"] == 0
 
 
-@pytest.mark.parametrize("failure", ["duplicate_identity", "missing_file", "unreadable_file", "malformed_json"])
+@pytest.mark.parametrize("failure", ["duplicate_identity", "missing_file", "unreadable_file", "malformed_json",
+                                     "deeply_nested_json"])
 def test_cli_invalid_plan_has_no_trusted_denominator(synthetic, failure):
     plan, packet, root = synthetic
     plan_path, packet_path = root / "plan.json", root / "packet.json"
@@ -402,5 +409,9 @@ def test_cli_invalid_plan_has_no_trusted_denominator(synthetic, failure):
         plan_path.mkdir()
     elif failure == "malformed_json":
         plan_path.write_text('{"expected": [', encoding="utf-8")
+    elif failure == "deeply_nested_json":
+        plan_path.write_text('{"expected":' + "[" * 1200 + "0" + "]" * 1200 + "}", encoding="utf-8")
     report = run_cli(plan_path, packet_path, root)
     assert "coverage" not in report and "cases" not in report
+    if failure == "deeply_nested_json":
+        assert report["errors"] == ["JSON nesting is too deep"]
