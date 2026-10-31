@@ -318,3 +318,74 @@ def test_cli_stdout_only_and_invalid_duplicate_json_keys(synthetic):
                             env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}, check=False)
     assert result.returncode == 2 and not result.stderr
     assert json.loads(result.stdout)["errors"] == ["JSON contains duplicate object keys"]
+
+
+def run_cli(plan_path, packet_path, root):
+    command = [sys.executable, "-m", "validation.mechanism_research_20261030.observation_intake",
+               "--plan", str(plan_path), "--packet", str(packet_path), "--evidence-root", str(root), "--as-of", AS_OF]
+    result = subprocess.run(command, cwd=Path(__file__).parent, capture_output=True, text=True,
+                            env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}, check=False)
+    assert result.returncode == 2 and not result.stderr
+    report = json.loads(result.stdout)
+    assert report["status"] == "invalid" and report["errors"]
+    assert report["ready_for_independent_review"] is False
+    assert report["blindness_verified"] is False
+    assert report["label_truth"] == "not_verified"
+    assert report["official_formula_replication"] == "not_established"
+    assert report["mechanism_parity"] == "not_evaluated"
+    assert str(root) not in result.stdout
+    return report
+
+
+@pytest.mark.parametrize("failure,cause", [
+    ("duplicate_keys", "JSON contains duplicate object keys"),
+    ("truncated_json", "Expecting value"),
+    ("missing_file", "FileNotFoundError"),
+    ("unreadable_file", "IsADirectoryError"),
+    ("oversize_source", "File name too long"),
+])
+def test_cli_packet_failures_preserve_valid_plan(synthetic, failure, cause):
+    plan, packet, root = synthetic
+    plan_path, packet_path = root / "plan.json", root / "packet.json"
+    plan_path.write_text(json.dumps(plan), encoding="utf-8")
+    if failure == "duplicate_keys":
+        packet_path.write_text('{"purpose":"contract_calibration","purpose":"blind_validation"}', encoding="utf-8")
+    elif failure == "truncated_json":
+        packet_path.write_text('{"observations": [', encoding="utf-8")
+    elif failure == "unreadable_file":
+        packet_path.mkdir()
+    elif failure == "oversize_source":
+        packet["observations"][0]["source"]["path"] = "x" * (os.pathconf(root, "PC_NAME_MAX") + 1)
+        packet_path.write_text(json.dumps(packet), encoding="utf-8")
+    report = run_cli(plan_path, packet_path, root)
+    assert_invalid(report)
+    assert report["coverage"]["planned"] == 18
+    assert report["coverage"]["usable"] == 0
+    identity = lambda row: tuple(row[field] for field in ("symbol", "date", "indicator", "period"))
+    assert {identity(row) for row in report["cases"]} == {identity(row) for row in plan["expected"]}
+    assert all(row["usable"] is False for row in report["cases"])
+    assert any(cause in error for error in report["errors"])
+    if failure == "oversize_source":
+        assert report["coverage"]["invalid"] == 1
+        assert report["coverage"]["observed"] == 17
+        failed = next(row for row in report["cases"] if identity(row) == identity(packet["observations"][0]))
+        assert failed["status"] == "invalid" and cause in failed["reason"]
+    else:
+        assert report["coverage"]["invalid"] == 18
+        assert report["coverage"]["observed"] == 0
+
+
+@pytest.mark.parametrize("failure", ["duplicate_identity", "missing_file", "unreadable_file", "malformed_json"])
+def test_cli_invalid_plan_has_no_trusted_denominator(synthetic, failure):
+    plan, packet, root = synthetic
+    plan_path, packet_path = root / "plan.json", root / "packet.json"
+    packet_path.write_text(json.dumps(packet), encoding="utf-8")
+    if failure == "duplicate_identity":
+        plan["expected"].append(deepcopy(plan["expected"][0]))
+        plan_path.write_text(json.dumps(plan), encoding="utf-8")
+    elif failure == "unreadable_file":
+        plan_path.mkdir()
+    elif failure == "malformed_json":
+        plan_path.write_text('{"expected": [', encoding="utf-8")
+    report = run_cli(plan_path, packet_path, root)
+    assert "coverage" not in report and "cases" not in report

@@ -1,9 +1,11 @@
 """Offline acquisition readiness only. Never compare predictions with labels."""
 import argparse
 from collections import Counter
+from dataclasses import dataclass
 from datetime import date, datetime, timezone
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 import stat
@@ -14,6 +16,35 @@ from .display_measurement import _exact
 _IDENTITY = ("symbol", "date", "indicator", "period")
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 _SOURCE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z")
+
+
+@dataclass
+class _ValidatedPlan:
+    plan: dict
+    expected: dict
+    planned_at: datetime
+    frozen_at: datetime
+    check_at: datetime
+    root: Path
+    sources: dict
+    prediction: dict
+    contracts: dict
+    digest: str
+
+
+def _negative_flags():
+    return {"ready_for_independent_review": False, "blindness_verified": False,
+            "label_truth": "not_verified", "official_formula_replication": "not_established",
+            "mechanism_parity": "not_evaluated"}
+
+
+def _input_error(exc):
+    if isinstance(exc, OSError):
+        cause = os.strerror(exc.errno) if exc.errno is not None else "filesystem operation failed"
+        return f"{type(exc).__name__}: {cause} (errno {exc.errno})"
+    if isinstance(exc, UnicodeError):
+        return "input JSON is not valid UTF-8"
+    return str(exc)
 
 
 def _keys(value, required, name):
@@ -93,19 +124,19 @@ def _evidence(reference, root, sources):
     if (not isinstance(relative, str) or "\\" in relative
             or any(part in ("", ".", "..") for part in relative.split("/"))):
         raise ValueError("evidence path must be relative without traversal")
-    path = root
-    for part in relative.split("/"):
-        path = path / part
-        if path.is_symlink():
-            raise ValueError("evidence symlinks are not allowed")
     try:
+        path = root
+        for part in relative.split("/"):
+            path = path / part
+            if path.is_symlink():
+                raise ValueError("evidence symlinks are not allowed")
         resolved = path.resolve(strict=True)
         if not resolved.is_relative_to(root) or not stat.S_ISREG(resolved.stat().st_mode):
             raise ValueError("evidence must be a regular file inside the evidence root")
         with resolved.open("rb") as stream:
             actual = hashlib.file_digest(stream, "sha256").hexdigest()
     except OSError as exc:
-        raise ValueError("evidence reference is missing or unreadable") from exc
+        raise ValueError(f"evidence reference is missing or unreadable ({_input_error(exc)})") from exc
     if actual != digest:
         raise ValueError("evidence hash does not match local bytes")
     binding = (relative, digest)
@@ -197,6 +228,10 @@ def validate_intake(plan, packet, evidence_root, *, as_of=None):
     Malformed plans raise ValueError because no trustworthy denominator exists.
     Packet errors produce an invalid report with zero usable coverage.
     """
+    return _validate_packet(packet, _validate_plan(plan, evidence_root, as_of=as_of))
+
+
+def _validate_plan(plan, evidence_root, *, as_of=None):
     _keys(plan, ("planned_at", "prediction_frozen_at", "prediction", "purpose", "expected"), "plan")
     planned_at = _timestamp(plan["planned_at"], "planned_at")
     frozen_at = _timestamp(plan["prediction_frozen_at"], "prediction_frozen_at")
@@ -224,11 +259,21 @@ def validate_intake(plan, packet, evidence_root, *, as_of=None):
     prediction = _evidence(plan["prediction"], root, sources)
     contracts = {key: _contract(case["display_contract"], planned_at, root, sources) for key, case in expected.items()}
     digest = plan_sha256(plan)
+    return _ValidatedPlan(plan, expected, planned_at, frozen_at, check_at, root, sources, prediction, contracts, digest)
+
+
+def _validate_packet(packet, validated, *, packet_error=None):
+    plan, expected = validated.plan, validated.expected
+    planned_at, frozen_at, check_at = validated.planned_at, validated.frozen_at, validated.check_at
+    root, sources = validated.root, validated.sources
+    prediction, contracts, digest = validated.prediction, validated.contracts, validated.digest
     errors = []
     rows = []
     indexed = {}
     assembled_at = None
     try:
+        if packet_error is not None:
+            raise ValueError(packet_error)
         _keys(packet, ("plan_sha256", "prediction_sha256", "prediction_frozen_at", "purpose", "assembled_at",
                        "observations"), "packet")
         if _digest(packet["plan_sha256"], "plan_sha256") != digest:
@@ -256,7 +301,9 @@ def validate_intake(plan, packet, evidence_root, *, as_of=None):
         result.update(status="missing", metadata_checked=False, evidence_checked=False, usable=False,
                       contract_status=case["display_contract"]["status"], helper_contract_supported=contracts[key])
         matches = indexed.get(key, [])
-        if not matches:
+        if packet_error is not None:
+            result.update(status="invalid", reason=packet_error)
+        elif not matches:
             result["reason"] = "planned case missing from packet"
             errors.append(result["reason"])
         elif len(matches) != 1:
@@ -287,11 +334,11 @@ def validate_intake(plan, packet, evidence_root, *, as_of=None):
         status = "ready_for_independent_review"
     total = len(expected)
     usable = sum(row["usable"] for row in rows)
-    return {"status": status, "ready_for_independent_review": status == "ready_for_independent_review",
+    return {**_negative_flags(), "status": status,
+            "ready_for_independent_review": status == "ready_for_independent_review",
             "plan_sha256": digest, "prediction": prediction,
             "prediction_frozen_at": plan["prediction_frozen_at"], "purpose": plan["purpose"],
-            "as_of": check_at.isoformat(), "blindness_verified": False, "label_truth": "not_verified",
-            "official_formula_replication": "not_established", "mechanism_parity": "not_evaluated",
+            "as_of": check_at.isoformat(),
             "coverage": {"planned": total, "observed": counts["observed"], "usable": usable,
                          "usable_fraction": f"{usable}/{total}", "unavailable": counts["unavailable"],
                          "ambiguous": counts["ambiguous"], "missing": counts["missing"], "invalid": counts["invalid"]},
@@ -307,6 +354,11 @@ def _unique_object(pairs):
     return result
 
 
+def _load_json(filename):
+    with Path(filename).open(encoding="utf-8") as stream:
+        return json.load(stream, object_pairs_hook=_unique_object)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--plan", required=True)
@@ -314,16 +366,14 @@ def main(argv=None):
     parser.add_argument("--evidence-root", required=True)
     parser.add_argument("--as-of", help="Caller-declared aware checking time; defaults to local UTC now")
     args = parser.parse_args(argv)
+    validated = None
     try:
-        documents = []
-        for filename in (args.plan, args.packet):
-            with Path(filename).open(encoding="utf-8") as stream:
-                documents.append(json.load(stream, object_pairs_hook=_unique_object))
-        report = validate_intake(*documents, args.evidence_root, as_of=args.as_of)
+        validated = _validate_plan(_load_json(args.plan), args.evidence_root, as_of=args.as_of)
+        report = _validate_packet(_load_json(args.packet), validated)
     except (OSError, ValueError, TypeError, KeyError) as exc:
-        message = "input file is unreadable" if isinstance(exc, OSError) else str(exc)
-        report = {"status": "invalid", "errors": [message], "label_truth": "not_verified",
-                  "official_formula_replication": "not_established", "mechanism_parity": "not_evaluated"}
+        message = _input_error(exc)
+        report = ({**_negative_flags(), "status": "invalid", "errors": [message]} if validated is None
+                  else _validate_packet(None, validated, packet_error=message))
     print(json.dumps(report, ensure_ascii=False, sort_keys=True, indent=2, allow_nan=False))
     return 2 if report["status"] == "invalid" else 0
 
