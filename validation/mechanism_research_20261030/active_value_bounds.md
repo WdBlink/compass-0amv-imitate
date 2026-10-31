@@ -31,6 +31,8 @@
 
 有一个可以拿别的股票推翻的解释：[农行 8 月 29 日公布的半年报](https://www.abchina.com/cn/AboutABC/investor_relations/report/mm/202308/P020230829718161058899.pdf)第 79–81 页按 A+H 合列前十名；其中一户持 H 股，九户持 A 股。结合此前已公告的[7 月 3 日解禁](https://www.abchina.com/cn/AboutABC/investor_relations/announcements/a-announcement/202306/P020230627653511532041.pdf)，按「A 股流通盘减去该名单中的 A 股持仓，沿用最近披露记录」得约 217.42 亿股；以实际成交量重算为 **0.95071%**，与 App 的两位小数相符。不是「A 股股东单独排行的前十户」；也没有证明九户到 8 月 31 日持仓不变。该假设是看到官方算例后提出的，且不止一个分母能落入同一显示格。[指南针另一篇原文](https://app.compass.cn/article/news.php?newsid=33838916&style=0)虽同时讨论活筹与市场指标，也没有披露两者之间的聚合等式。下一步应在未参与推导的其他个股及锁仓变化日期验证，并另外查市场聚合，而不是据此调整指数比例。
 
+作为第二个例子，[江淮汽车的两日对照](stock_mechanism_witnesses.md)给出了在读取官方个股活筹换手率之前固定的预测。三种分母给出不同的显示值，目前还没有这两天的官方个股读数。
+
 ## 复跑
 
 先从已冻结的逐股市场快照离线生成一个新 CSV，保存其读回摘要；再用独立进程读取之前采集的 64 日官方文件。输出路径必须是不同的新文件。快照与官方资料须独立取得；仓库不分发私有行情原包。
@@ -40,9 +42,11 @@ python -m validation.mechanism_research_20261030.active_value_bound \
   --root "$SNAPSHOT_DIR" --manifest-sha256 "$FROZEN_MARKET_SHA256" \
   --output "$NEW_BOUNDS_CSV" --receipt "$NEW_FREEZE_JSON"
 python -m validation.mechanism_research_20261030.score_active_value_bound \
-  --bounds "$NEW_BOUNDS_CSV" --frozen-sha256 "$FROZEN_BOUNDS_SHA256" \
+  --bounds "$NEW_BOUNDS_CSV" \
   --official validation/exact_parity_20261030/official.csv \
   --calendar validation/exact_parity_20261030/calendar.csv --out "$NEW_SCORE_JSON"
 ```
 
-本次下界 CSV 的 SHA-256 为 `4bafb34e9da286d7ba46f5543bdc3748bf3bb591a7fd5667753a97c2e140c752`。这是数据冻结标识，不是公式通过验收的证明。
+正式评分器固定了原始预测收据中的下界 CSV 摘要 `4bafb34e9da286d7ba46f5543bdc3748bf3bb591a7fd5667753a97c2e140c752`，以及已披露标签和交易日历的摘要。换文件后重算一个 SHA-256 不能替换这些标识。持有原始收据时，可加 `--freeze-receipt "$ORIGINAL_FREEZE_JSON"` 核验原件；新复跑的收据含不同的时间和路径，不是原件。核验这些输入不能证明公式复刻。
+
+本地合成测试使用 `--generic --frozen-sha256 "$LOCAL_BOUNDS_SHA256"`，终端和报告会标明 `generic_diagnostic_only_not_campaign_evidence`。两种模式都要求原生 CSV 的完整覆盖列：当日合格与排除数之和须等于已见证券数，各排除原因之和须等于排除数。较长回看窗的合格股票不能更多，但其金额不要求单调。
