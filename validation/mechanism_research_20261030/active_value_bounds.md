@@ -49,4 +49,6 @@ python -m validation.mechanism_research_20261030.score_active_value_bound \
 
 正式评分器固定了原始预测收据中的下界 CSV 摘要 `4bafb34e9da286d7ba46f5543bdc3748bf3bb591a7fd5667753a97c2e140c752`，以及已披露标签和交易日历的摘要。换文件后重算一个 SHA-256 不能替换这些标识。持有原始收据时，可加 `--freeze-receipt "$ORIGINAL_FREEZE_JSON"` 核验原件；新复跑的收据含不同的时间和路径，不是原件。核验这些输入不能证明公式复刻。
 
-本地合成测试使用 `--generic --frozen-sha256 "$LOCAL_BOUNDS_SHA256"`，终端和报告会标明 `generic_diagnostic_only_not_campaign_evidence`。两种模式都要求原生 CSV 的完整覆盖列：当日合格与排除数之和须等于已见证券数，各排除原因之和须等于排除数。较长回看窗的合格股票不能更多，但其金额不要求单调。
+本地合成测试使用 `--generic --frozen-sha256 "$LOCAL_BOUNDS_SHA256"`，终端和报告会标明 `generic_diagnostic_only_not_campaign_evidence`。两种模式都要求原生 CSV 的完整覆盖列：当日合格与排除数之和须等于已见证券数，各排除原因之和须等于排除数。
+
+评分器分别检查沪市和由沪深合计减去沪市得到的深市。同一天，长窗的合格股票是短窗的子集。若只数减少，金额下界可以下降；若只数相等，两窗包含的就是同一批股票。按同一天的收盘价和股本估值，延长窗口不会减少任何一只股票的贡献，逐股向下舍入也不改变这个方向，因此同一批股票的下界只能持平或增加。

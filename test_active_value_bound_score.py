@@ -13,7 +13,7 @@ from validation.mechanism_research_20261030.active_value_bound import COLUMNS, E
 
 ROWS = [
     # Exactly at, below and above the upper display interval of 100.0.
-    ("SH", "5", "2", "0"), ("SH_SZ", "5", "5", "100.05"),
+    ("SH", "5", "2", "100.00"), ("SH_SZ", "5", "5", "100.05"),
     ("SH", "13", "1", "100.00"), ("SH_SZ", "13", "4", "100.050000000001"),
     ("SH", "34", "1", "100.06"), ("SH_SZ", "34", "3", "101.0"),
 ]
@@ -120,12 +120,32 @@ def test_seen_population_cannot_shrink_across_reported_days(tmp_path):
 def test_full_coverage_required_but_bounds_need_not_increase_with_lookback(tmp_path):
     labels, calendar, bounds = inputs(tmp_path)
     cells = list(grid(ROWS))
-    cells[0]["lower_yi"], cells[1]["lower_yi"] = 180, 190
+    cells[0]["lower_yi"], cells[1]["lower_yi"] = 180, "180.05"
     write_grid(bounds, cells)
     assert len(score(labels, calendar, bounds, hashlib.sha256(bounds.read_bytes()).hexdigest(), generic=True)["details"]) == 6
     write_grid(bounds, cells, columns=COLUMNS[:-1])
     with pytest.raises(ValueError, match="complete native"):
         score(labels, calendar, bounds, hashlib.sha256(bounds.read_bytes()).hexdigest(), generic=True)
+
+
+@pytest.mark.parametrize(("sh", "both", "rejected_market"), [
+    ([(2, "10"), (2, "9.999999999999"), (2, "11")], [(4, "20"), (4, "21"), (4, "23")], "SH"),
+    ([(3, "10"), (2, "12"), (1, "14")], [(5, "20"), (4, "22"), (3, "23.999999999999")], "SZ"),
+    ([(3, "12"), (2, "9"), (2, "9")], [(6, "24"), (4, "18"), (4, "18")], None),
+], ids=["sh-decreases", "implied-sz-decreases", "shrinking-then-unchanged-cohorts"])
+def test_cli_lower_bound_cannot_decrease_for_the_same_cohort(tmp_path, sh, both, rejected_market):
+    rows = [(market, window, n, lower)
+            for market, cells in (("SH", sh), ("SH_SZ", both))
+            for window, (n, lower) in zip(("5", "13", "34"), cells, strict=True)]
+    paths = inputs(tmp_path, rows)
+    out = tmp_path / "score.json"
+    p = cli(paths, out, "--generic", "--frozen-sha256", hashlib.sha256(paths[2].read_bytes()).hexdigest())
+    if rejected_market:
+        assert p.returncode == 2 and f" {rejected_market}:" in p.stderr
+        assert not out.exists()
+    else:
+        assert p.returncode == 0, p.stderr
+        assert len(json.loads(out.read_bytes())["details"]) == 6
 
 
 @pytest.mark.parametrize(("which", "message"), [("one-day", "official labels"), ("labels", "official labels"),

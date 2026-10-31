@@ -75,6 +75,8 @@ def _read_grid(raw: bytes, dates: list[str]) -> dict[tuple[str, str, str], Bound
             for short, long in zip(cells, cells[1:]):
                 if short.eligible < long.eligible or any(a > b for a, b in zip(short.reasons, long.reasons)):
                     raise ValueError(f"{day} {market}: eligible and exclusion counts are not nested across windows")
+                if short.eligible == long.eligible and long.lower < short.lower:
+                    raise ValueError(f"{day} {market}: lower bound decreases for the same eligible cohort")
     return parsed
 
 
