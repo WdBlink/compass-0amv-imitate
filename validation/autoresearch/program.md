@@ -80,6 +80,12 @@ official aggregate is one constant factor times this model, which is the
 evidence that the formula is structurally the official one rather than a
 curve fit.
 
+Because the factor is constant it does not touch the daily change
+percentage, only the absolute level: the raw model level is ~0.27 %
+*above* the official one, so aligning means multiplying the model level
+**by** 0.997364 (`amv.py --scale`, `OFFICIAL_LEVEL_SCALE`).  The level
+MAPE drops from 0.2643 % to 0.0516 %.
+
 `lambda` was selected on the dev half and independently confirmed on
 the holdout half — both pick 0.9235 (`cv.py`).  The mean out-of-sample
 MAE over the two directions is 0.0233 pp.
@@ -144,5 +150,6 @@ to stderr, and append one row to `results.tsv`.
     diagnose_*.py   structural probes (drift of the level ratio, mixes)
     amv.py          the deployable implementation (label free)
     test_amv.py     tests for the deployable implementation
+    compare_table.py  64-day model-vs-official table, raw and aligned
     results.tsv     the iteration log
 

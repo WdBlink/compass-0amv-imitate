@@ -289,6 +289,45 @@ def test_cli_matches_the_library():
     np.testing.assert_allclose(got, ref, rtol=1e-9)
 
 
+def test_scale_moves_the_level_but_not_the_change():
+    """--scale is a pure level calibration: daily changes must not move."""
+    import csv
+    import subprocess
+    import tempfile
+
+    rows = [
+        ("20260105", "600000.SH", 10.0, 1000.0, 100000.0),
+        ("20260105", "000001.SZ", 12.0, 800.0, 200000.0),
+        ("20260106", "600000.SH", 10.5, 1200.0, 100000.0),
+        ("20260106", "000001.SZ", 11.8, 900.0, 200000.0),
+    ]
+    with tempfile.TemporaryDirectory() as tmp:
+        src = os.path.join(tmp, "panel.csv")
+        raw = os.path.join(tmp, "raw.csv")
+        scaled = os.path.join(tmp, "scaled.csv")
+        with open(src, "w", newline="", encoding="utf-8") as fh:
+            w = csv.writer(fh)
+            w.writerow(["trade_date", "ts_code", "close", "vol", "float_share"])
+            w.writerows(rows)
+        for dst, extra in ((raw, []), (scaled, ["--scale", str(amv.OFFICIAL_LEVEL_SCALE)])):
+            subprocess.run(
+                [sys.executable, os.path.join(HERE, "amv.py"),
+                 "--input", src, "--out", dst, *extra],
+                check=True,
+            )
+        with open(raw, newline="", encoding="utf-8") as fh:
+            a = list(csv.DictReader(fh))
+        with open(scaled, newline="", encoding="utf-8") as fh:
+            b = list(csv.DictReader(fh))
+
+    for r_a, r_b in zip(a, b):
+        np.testing.assert_allclose(
+            float(r_b["amv_cny"]), float(r_a["amv_cny"]) * amv.OFFICIAL_LEVEL_SCALE,
+            rtol=1e-6,
+        )
+        assert r_b["change_pct"] == r_a["change_pct"]
+
+
 def _main() -> int:
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     failed = 0
