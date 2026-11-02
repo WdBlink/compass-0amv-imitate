@@ -40,10 +40,10 @@
 先从已冻结的逐股市场快照离线生成一个新 CSV，保存其读回摘要；再用独立进程读取之前采集的 64 日官方文件。输出路径必须是不同的新文件。快照与官方资料须独立取得；仓库不分发私有行情原包。
 
 ```sh
-python -m validation.mechanism_research_20261030.active_value_bound \
+python -m research.mechanism_research_20261030.active_value_bound \
   --root "$SNAPSHOT_DIR" --manifest-sha256 "$FROZEN_MARKET_SHA256" \
   --output "$NEW_BOUNDS_CSV" --receipt "$NEW_FREEZE_JSON"
-python -m validation.mechanism_research_20261030.score_active_value_bound \
+python -m research.mechanism_research_20261030.score_active_value_bound \
   --bounds "$NEW_BOUNDS_CSV" \
   --official research/exact_parity_20261030/official.csv \
   --calendar research/exact_parity_20261030/calendar.csv --out "$NEW_SCORE_JSON"
