@@ -63,6 +63,7 @@ def evaluate(spec: dict, panel=None) -> dict:
 
     lvl_err = pred_level - off_close
     lvl_mae = float(np.mean(np.abs(lvl_err)))
+    # Unscaled: how far the raw model level is from the official level.
     lvl_mape = float(np.mean(np.abs(lvl_err) / off_close) * 100.0)
 
     # Structural check: the model level should be the official level times
@@ -70,6 +71,9 @@ def evaluate(spec: dict, panel=None) -> dict:
     ratio = off_close / np.where(pred_level != 0, pred_level, np.nan)
     ratio_mean = float(np.nanmean(ratio))
     ratio_cv = float(np.nanstd(ratio) / ratio_mean)
+    # Scaled: the residual left after removing that one constant factor.
+    lvl_mape_scaled = float(np.mean(np.abs(ratio_mean * pred_level - off_close)
+                                    / off_close) * 100.0)
 
     # Threshold-trigger agreement on the +/-4% / -2.3% rule.
     trig = lambda a: np.where(a >= 4.0, 1, np.where(a <= -2.3, -1, 0))
@@ -85,6 +89,7 @@ def evaluate(spec: dict, panel=None) -> dict:
         "mae_holdout": mae_hold,
         "level_mae": lvl_mae,
         "level_mape_pct": lvl_mape,
+        "level_mape_scaled_pct": lvl_mape_scaled,
         "level_ratio_mean": ratio_mean,
         "level_ratio_cv": ratio_cv,
         "trigger_match": trig_match,

@@ -85,6 +85,8 @@ def main() -> None:
         "bias": round(res["bias"], 6),
         "dir_hit": round(res["dir_hit"], 4),
         "level_mape_pct": round(res["level_mape_pct"], 4),
+        "level_mape_scaled_pct": round(res["level_mape_scaled_pct"], 5),
+        "level_ratio_cv": round(res["level_ratio_cv"], 6),
         "trigger_match": f"{res['trigger_match']}/{res['trigger_n']}",
     }
     print(json.dumps(extra, ensure_ascii=False))

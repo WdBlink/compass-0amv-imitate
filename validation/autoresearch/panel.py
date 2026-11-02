@@ -43,6 +43,7 @@ class Panel:
     dates: np.ndarray          # (nd,)  YYYYMMDD strings
     codes: np.ndarray          # (ns,)  ts_code strings
     close: np.ndarray          # (nd, ns) unadjusted CNY/share, NaN where absent
+    adj_factor: np.ndarray     # (nd, ns) dimensionless; NaN where absent
     vol_shares: np.ndarray     # (nd, ns)
     amount_cny: np.ndarray     # (nd, ns)
     float_shares: np.ndarray   # (nd, ns)
@@ -105,7 +106,8 @@ def build_panel(use_cache: bool = True) -> Panel:
     if use_cache and os.path.exists(CACHE_PATH):
         z = np.load(CACHE_PATH, allow_pickle=False)
         return Panel(
-            dates=z["dates"], codes=z["codes"], close=z["close"], vol_shares=z["vol_shares"],
+            dates=z["dates"], codes=z["codes"], close=z["close"], adj_factor=z["adj_factor"],
+            vol_shares=z["vol_shares"],
             amount_cny=z["amount_cny"], float_shares=z["float_shares"],
             free_shares=z["free_shares"], circ_mv=z["circ_mv"],
             turnover_rate=z["turnover_rate"], board=z["board"],
@@ -113,6 +115,7 @@ def build_panel(use_cache: bool = True) -> Panel:
 
     daily = _load_endpoint("daily")
     basic = _load_endpoint("daily_basic")
+    adjf = _load_endpoint("adj_factor")
 
     dates = sorted(set(daily) & set(basic))
     codes = sorted({c for d in dates for c in daily[d]})
@@ -121,6 +124,7 @@ def build_panel(use_cache: bool = True) -> Panel:
     nd, ns = len(dates), len(codes)
 
     close = np.full((nd, ns), np.nan)
+    adj = np.full((nd, ns), np.nan)
     vol = np.full((nd, ns), np.nan)
     amt = np.full((nd, ns), np.nan)
     fsh = np.full((nd, ns), np.nan)
@@ -134,6 +138,11 @@ def build_panel(use_cache: bool = True) -> Panel:
             close[i, j] = rec["close"]
             vol[i, j] = rec["vol"] * 100.0 if rec["vol"] is not None else np.nan
             amt[i, j] = rec["amount"] * 1000.0 if rec["amount"] is not None else np.nan
+        for c, rec in adjf.get(d, {}).items():
+            j = ci.get(c)
+            if j is None:
+                continue
+            adj[i, j] = rec["adj_factor"]
         for c, rec in basic.get(d, {}).items():
             j = ci.get(c)
             if j is None:
@@ -145,10 +154,12 @@ def build_panel(use_cache: bool = True) -> Panel:
 
     board = np.array([_board_of(c) for c in codes])
 
-    panel = Panel(dates=np.array(dates), codes=np.array(codes), close=close, vol_shares=vol,
+    panel = Panel(dates=np.array(dates), codes=np.array(codes), close=close, adj_factor=adj,
+                  vol_shares=vol,
                   amount_cny=amt, float_shares=fsh, free_shares=frsh, circ_mv=cmv,
                   turnover_rate=tor, board=board)
     np.savez_compressed(CACHE_PATH, dates=panel.dates, codes=panel.codes, close=close,
+                        adj_factor=adj,
                         vol_shares=vol, amount_cny=amt, float_shares=fsh, free_shares=frsh,
                         circ_mv=cmv, turnover_rate=tor, board=board)
     return panel

@@ -20,6 +20,7 @@ import numpy as np
 
 from evaluate import evaluate, load_official
 from model import build_panel, model_components
+from spec import FINAL_SPEC
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -37,11 +38,12 @@ def _slice_panel(panel, idx):
         amount_cny=panel.amount_cny[idx], float_shares=panel.float_shares[idx],
         free_shares=panel.free_shares[idx], circ_mv=panel.circ_mv[idx],
         turnover_rate=panel.turnover_rate[idx], board=panel.board,
+        adj_factor=panel.adj_factor[idx],
     )
 
 
 def main() -> None:
-    spec = {"window": 55, "decay": 0.925, "market": "all_a"}
+    spec = FINAL_SPEC
     panel = build_panel()
     off_dates, off_close, off_chg = load_official()
     off_idx = np.array([panel.date_index(d) for d in off_dates])
@@ -102,7 +104,10 @@ def main() -> None:
     print(f"\n   MAE={np.mean(np.abs(errs)):.4f}  max|err|={np.max(np.abs(errs)):.4f}  "
           f"bias={np.mean(errs):+.4f}  dir={np.mean(np.sign(pred_c)==np.sign(off_chg)):.3f}")
     ratios = off_close / pred_l
-    print(f"   level ratio official/model: mean={ratios.mean():.6f} std={ratios.std():.6f}")
+    print(f"   level ratio official/model: mean={ratios.mean():.6f} std={ratios.std():.6f} "
+          f"CV={ratios.std()/ratios.mean():.6f}")
+    print(f"   level MAPE raw={np.mean(np.abs(pred_l-off_close)/off_close)*100:.4f}%  "
+          f"scaled={np.mean(np.abs(ratios.mean()*pred_l-off_close)/off_close)*100:.5f}%")
 
     # ---- 5. warmup convergence -----------------------------------------
     print("\n5. warmup convergence: re-run starting from different panel starts")

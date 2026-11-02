@@ -1,3 +1,5 @@
 iteration	commit	metric	delta	status	description
 0	00d9911	0.026186	+nan	baseline	iteration 0: baseline batch-replacement active-chip model, N=55 lambda=0.925
 #detail {"spec": {"window": 55, "decay": 0.925, "market": "all_a"}, "mae_dev": 0.022451, "mae_holdout": 0.030693, "rmse": 0.036431, "bias": -0.003376, "dir_hit": 1.0, "level_mape_pct": 1.3112, "trigger_match": "64/64"}
+1	d285183	0.023671	-0.002515	keep	iteration 1: fine (N,lambda) grid, selected on dev half only; N=70 lambda=0.924
+#detail {"spec": {"window": 70, "decay": 0.924, "market": "all_a"}, "mae_dev": 0.019954, "mae_holdout": 0.028158, "rmse": 0.034633, "bias": 0.001286, "dir_hit": 1.0, "level_mape_pct": 0.6458, "trigger_match": "64/64"}
