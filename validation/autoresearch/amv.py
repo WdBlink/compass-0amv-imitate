@@ -66,6 +66,16 @@ DECAY = 0.9235
 # (MAE varies in the 5th decimal over 5..60).
 INIT_WINDOW = 20
 
+# Level calibration against the official aggregate: the official level
+# equals this model's level times this factor.  It was fitted on the
+# 64-day official window (2026-07-27 … 2026-10-30) and is stable there
+# (coefficient of variation 0.0006).  Because it is a constant it does
+# NOT change the daily change percentage — apply it only when absolute
+# levels are compared with the official index.  The model level is
+# ~0.27% ABOVE the official one, so aligning means multiplying by this
+# factor, not dividing.
+OFFICIAL_LEVEL_SCALE = 0.997364
+
 # Tushare unit conversions.
 HAND = 100.0          # 1 手 = 100 股
 WAN = 10_000.0        # 1 万股 = 10000 股
@@ -259,6 +269,10 @@ def main() -> None:
     ap.add_argument("--decay", type=float, default=DECAY)
     ap.add_argument("--market", choices=["all_a", "all_a_bse"], default="all_a",
                     help="universe: all_a = A-shares ex-BSE (the official definition)")
+    ap.add_argument("--scale", type=float, default=1.0,
+                    help="multiply the index level by this factor; pass "
+                         f"{OFFICIAL_LEVEL_SCALE} to align absolute levels with "
+                         "the official index (daily changes are unaffected)")
     args = ap.parse_args()
 
     rows = _read_csv(args.input)
@@ -279,6 +293,8 @@ def main() -> None:
 
     levels = active_market_value(vol, fsh, close, decay=args.decay,
                                  market_mask=_market_mask_for(args.market, codes))
+    if args.scale != 1.0:
+        levels = levels * args.scale
     chg = daily_change_pct(levels)
 
     out = args.out
