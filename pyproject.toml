@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "compass-0amv"
+version = "0.2.0"
+description = "Replication of the 指南针 0AMV active-market-value index"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+dependencies = ["numpy>=1.26"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+research = ["numpy>=1.26", "pandas>=2.0"]
+
+[project.scripts]
+compass-0amv = "compass_0amv.cli:main"
+
+[tool.setuptools]
+packages = ["compass_0amv"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
