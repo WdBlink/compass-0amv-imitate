@@ -18,7 +18,7 @@ import json
 
 import numpy as np
 
-from evaluate import evaluate, load_official
+from evaluate import dev_mask, evaluate, load_official
 from model import build_panel
 from spec import FINAL_SPEC
 
@@ -51,7 +51,7 @@ def main() -> None:
     panel = build_panel()
     off_dates, _, _ = load_official()
     n = len(off_dates)
-    dev = np.zeros(n, bool); dev[: n // 2] = True
+    dev = dev_mask(n)
     hold = ~dev
 
     if args.spec:

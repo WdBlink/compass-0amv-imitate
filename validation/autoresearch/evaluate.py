@@ -24,11 +24,18 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 OFFICIAL_CSV = os.path.join(HERE, "..", "exact_parity_20261030", "official.csv")
 
 # The official set is 2026-07-27 .. 2026-10-30.
-# Split for honesty reporting: the first half is the "dev" slice, the
-# second half the "holdout" slice. All 64 days are already exposed, so
-# neither slice is a genuine blind window -- they only guard against a
-# single lucky regime.
-DEV_END = "20260913"
+# Split for honesty reporting: the first half of the window is the "dev"
+# slice, the second half the "holdout" slice.  All 64 days are already
+# exposed, so neither slice is a genuine blind window -- they only guard
+# against a single lucky regime.
+#
+# The split is by INDEX, not by calendar date, so that `evaluate.py` and
+# `cv.py` always agree on which day belongs to which half.
+def dev_mask(n: int) -> np.ndarray:
+    """True for the first half of the n official days."""
+    m = np.zeros(n, bool)
+    m[: n // 2] = True
+    return m
 
 
 def load_official() -> tuple[list[str], np.ndarray, np.ndarray]:
@@ -57,7 +64,7 @@ def evaluate(spec: dict, panel=None) -> dict:
     bias = float(np.mean(err))
     dir_hit = float(np.mean(np.sign(pred_chg) == np.sign(off_chg)))
 
-    dev = np.array([d <= DEV_END for d in off_dates])
+    dev = dev_mask(len(off_dates))
     mae_dev = float(np.mean(np.abs(err[dev])))
     mae_hold = float(np.mean(np.abs(err[~dev])))
 
