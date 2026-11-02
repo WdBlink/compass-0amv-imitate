@@ -85,6 +85,7 @@ def write_series(path: str) -> None:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--csv", default=None, help="write the 64 comparison rows as CSV")
+    ap.add_argument("--md", default=None, help="write the 64 comparison rows as Markdown")
     ap.add_argument("--series-out", default=None,
                     help="write the full model series (raw + official-aligned) as CSV")
     args = ap.parse_args()
@@ -102,22 +103,36 @@ def main() -> None:
             w.writeheader()
             w.writerows(rows)
         print(f"wrote {args.csv}", file=sys.stderr)
-    if args.series_out:
-        write_series(args.series_out)
 
-    print("| # | 日期 | 段 | 官方收盘 | 复刻收盘 | 对齐后收盘 | 水平比值 | 官方日幅% | 复刻日幅% | 误差pp | 方向 |")
-    print("|--:|---|---|--:|--:|--:|--:|--:|--:|--:|:-:|")
+    table = [
+        "| # | 日期 | 段 | 官方收盘 | 复刻收盘 | 对齐后收盘 | 水平比值 | 官方日幅% | 复刻日幅% | 误差pp | 方向 |",
+        "|--:|---|---|--:|--:|--:|--:|--:|--:|--:|:-:|",
+    ]
     for i, r in enumerate(rows, 1):
-        print(
+        table.append(
             f"| {i} | {r['date']} | {r['half']} | {r['official_close']:.1f} | "
             f"{r['model_close']:.1f} | {r['aligned_close']:.1f} | "
             f"{r['level_ratio']:.5f} | "
             f"{r['official_change_pct']:+.2f} | {r['model_change_pct']:+.2f} | "
             f"{r['err_pp']:+.3f} | {'✓' if r['dir_ok'] else '✗'} |"
         )
-    print(f"\nMAE = {mae:.6f} pp   方向一致 {sum(r['dir_ok'] for r in rows)}/{len(rows)}")
-    print(f"level ratio = {level_ratio:.6f}   level MAPE 原始 {lvl_mape_raw:.4f}%  "
-          f"对齐后 {lvl_mape_aligned:.4f}%")
+    table.append("")
+    table.append(f"MAE = {mae:.6f} pp   方向一致 {sum(r['dir_ok'] for r in rows)}/{len(rows)}   "
+                 f"level ratio = {level_ratio:.6f}   level MAPE 原始 {lvl_mape_raw:.4f}%  "
+                 f"对齐后 {lvl_mape_aligned:.4f}%")
+
+    if args.md:
+        with open(args.md, "w", encoding="utf-8") as fh:
+            fh.write("# 官方 0AMV vs 复刻模型：64 日逐日对比\n\n")
+            fh.write("收盘列为亿元（1e8 CNY）；「对齐后收盘」= 复刻收盘 × "
+                     f"{level_ratio:.6f}。误差 = 复刻日幅 − 官方日幅，单位为百分点。\n\n")
+            fh.write("\n".join(table) + "\n")
+        print(f"wrote {args.md}", file=sys.stderr)
+
+    if args.series_out:
+        write_series(args.series_out)
+
+    print("\n".join(table))
 
 
 if __name__ == "__main__":
