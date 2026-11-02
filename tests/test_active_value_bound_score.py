@@ -7,8 +7,8 @@ import sys
 
 import pytest
 
-from validation.mechanism_research_20261030.score_active_value_bound import score
-from validation.mechanism_research_20261030.active_value_bound import COLUMNS, EXCLUSIONS
+from research.mechanism_research_20261030.score_active_value_bound import score
+from research.mechanism_research_20261030.active_value_bound import COLUMNS, EXCLUSIONS
 
 
 ROWS = [
@@ -51,9 +51,9 @@ def run(tmp_path, rows, digest=None, days="2020-01-01\n2020-01-02\n"):
 
 def cli(paths, out, *flags):
     labels, calendar, bounds = paths
-    return subprocess.run([sys.executable, "-B", "-m", "validation.mechanism_research_20261030.score_active_value_bound",
+    return subprocess.run([sys.executable, "-B", "-m", "research.mechanism_research_20261030.score_active_value_bound",
                            "--official", str(labels), "--calendar", str(calendar), "--bounds", str(bounds),
-                           "--out", str(out), *flags], capture_output=True, text=True, cwd=Path(__file__).resolve().parent)
+                           "--out", str(out), *flags], capture_output=True, text=True, cwd=Path(__file__).resolve().parents[1])
 
 
 def test_strict_half_unit_and_unknowns(tmp_path):
@@ -152,7 +152,7 @@ def test_cli_lower_bound_cannot_decrease_for_the_same_cohort(tmp_path, sh, both,
                          ("sunday", "calendar"), ("rehashed-bounds", "campaign prediction freeze"),
                          ("fake-receipt", "original pre-score freeze receipt")])
 def test_campaign_rejects_substitution_without_writing_a_report(tmp_path, which, message):
-    official = Path(__file__).resolve().parent / "validation/exact_parity_20261030"
+    official = Path(__file__).resolve().parents[1] / "research/exact_parity_20261030"
     labels, calendar = official/"official.csv", official/"calendar.csv"
     bounds, out = tmp_path/"bounds.csv", tmp_path/"result.json"
     days = calendar.read_text().splitlines()[2:]

@@ -37,12 +37,12 @@ the official level times 0.997364 with a coefficient of variation of
 Usage
 -----
 
-    import amv
-    dates, levels = amv.from_tushare_frame(df)      # df: one row per stock-day
+    from compass_0amv import from_tushare_frame
+    dates, levels = from_tushare_frame(df)      # df: one row per stock-day
 
 or from the command line:
 
-    python3 amv.py --input panel.csv --out amv.csv
+    python3 -m compass_0amv --input panel.csv --out amv.csv
 
 where `panel.csv` has the columns `trade_date,ts_code,close,vol,
 float_share` in Tushare units (vol in hands, float_share in 万股).
@@ -50,8 +50,6 @@ float_share` in Tushare units (vol in hands, float_share in 万股).
 
 from __future__ import annotations
 
-import argparse
-import csv
 from typing import Iterable
 
 import numpy as np
@@ -242,71 +240,16 @@ def from_tushare_frame(df, *, market="all_a", **kwargs):
     vol[di_idx, ci_idx] = df["vol"].to_numpy(dtype=float) * HAND
     fsh[di_idx, ci_idx] = df["float_share"].to_numpy(dtype=float) * WAN
 
-    mask = _market_mask_for(market, codes)
+    mask = market_mask_for(market, codes)
     levels = active_market_value(vol, fsh, close,
                                   market_mask=mask, **kwargs)
     return dates, levels
 
 
-def _market_mask_for(market: str, codes) -> np.ndarray | None:
+def market_mask_for(market: str, codes) -> np.ndarray | None:
+    """The stock universe selector of a named market."""
     if market == "all_a":
         return a_share_mask(codes)
     if market == "all_a_bse":
         return np.ones(len(list(codes)), dtype=bool)
     raise ValueError(f"unknown market {market!r}")
-
-
-def _read_csv(path):
-    with open(path, newline="", encoding="utf-8") as fh:
-        return list(csv.DictReader(fh))
-
-
-def main() -> None:
-    ap = argparse.ArgumentParser(description="Compute the 0AMV active-market-value index.")
-    ap.add_argument("--input", required=True,
-                    help="CSV with trade_date,ts_code,close,vol,float_share")
-    ap.add_argument("--out", default=None, help="CSV to write (default: stdout)")
-    ap.add_argument("--decay", type=float, default=DECAY)
-    ap.add_argument("--market", choices=["all_a", "all_a_bse"], default="all_a",
-                    help="universe: all_a = A-shares ex-BSE (the official definition)")
-    ap.add_argument("--scale", type=float, default=1.0,
-                    help="multiply the index level by this factor; pass "
-                         f"{OFFICIAL_LEVEL_SCALE} to align absolute levels with "
-                         "the official index (daily changes are unaffected)")
-    args = ap.parse_args()
-
-    rows = _read_csv(args.input)
-    dates = sorted({r["trade_date"].replace("-", "") for r in rows})
-    codes = sorted({r["ts_code"] for r in rows})
-    di = {d: i for i, d in enumerate(dates)}
-    ci = {c: i for i, c in enumerate(codes)}
-
-    close = np.full((len(dates), len(codes)), np.nan)
-    vol = np.full((len(dates), len(codes)), np.nan)
-    fsh = np.full((len(dates), len(codes)), np.nan)
-    for r in rows:
-        i = di[r["trade_date"].replace("-", "")]
-        j = ci[r["ts_code"]]
-        close[i, j] = float(r["close"])
-        vol[i, j] = float(r["vol"]) * HAND
-        fsh[i, j] = float(r["float_share"]) * WAN
-
-    levels = active_market_value(vol, fsh, close, decay=args.decay,
-                                 market_mask=_market_mask_for(args.market, codes))
-    if args.scale != 1.0:
-        levels = levels * args.scale
-    chg = daily_change_pct(levels)
-
-    out = args.out
-    fh = open(out, "w", newline="", encoding="utf-8") if out else None
-    w = csv.writer(fh or __import__("sys").stdout)
-    w.writerow(["trade_date", "amv_cny", "amv_yi", "change_pct"])
-    for i, d in enumerate(dates):
-        w.writerow([d, f"{levels[i]:.2f}", f"{levels[i]/1e8:.4f}",
-                    "" if i == 0 else f"{chg[i]:.6f}"])
-    if fh:
-        fh.close()
-
-
-if __name__ == "__main__":
-    main()

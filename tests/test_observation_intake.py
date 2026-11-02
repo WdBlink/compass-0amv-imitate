@@ -9,7 +9,7 @@ import sys
 
 import pytest
 
-from validation.mechanism_research_20261030.observation_intake import plan_sha256, validate_intake
+from research.mechanism_research_20261030.observation_intake import plan_sha256, validate_intake
 
 
 AS_OF = "2026-10-30T12:00:00+00:00"
@@ -319,16 +319,16 @@ def test_cli_stdout_only_and_invalid_duplicate_json_keys(synthetic):
     plan_path, packet_path = root / "plan.json", root / "packet.json"
     plan_path.write_text(json.dumps(plan), encoding="utf-8")
     packet_path.write_text(json.dumps(packet), encoding="utf-8")
-    command = [sys.executable, "-m", "validation.mechanism_research_20261030.observation_intake",
+    command = [sys.executable, "-m", "research.mechanism_research_20261030.observation_intake",
                "--plan", str(plan_path), "--packet", str(packet_path), "--evidence-root", str(root), "--as-of", AS_OF]
     before = {path.name: path.read_bytes() for path in root.iterdir()}
-    result = subprocess.run(command, cwd=Path(__file__).parent, capture_output=True, text=True,
+    result = subprocess.run(command, cwd=Path(__file__).resolve().parents[1], capture_output=True, text=True,
                             env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}, check=False)
     assert result.returncode == 0 and not result.stderr
     assert json.loads(result.stdout)["status"] == "ready_for_independent_review"
     assert before == {path.name: path.read_bytes() for path in root.iterdir()}
     packet_path.write_text('{"purpose":"contract_calibration","purpose":"blind_validation"}', encoding="utf-8")
-    result = subprocess.run(command, cwd=Path(__file__).parent, capture_output=True, text=True,
+    result = subprocess.run(command, cwd=Path(__file__).resolve().parents[1], capture_output=True, text=True,
                             env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}, check=False)
     assert result.returncode == 2 and not result.stderr
     assert json.loads(result.stdout)["errors"] == ["JSON contains duplicate object keys"]
@@ -337,7 +337,7 @@ def test_cli_stdout_only_and_invalid_duplicate_json_keys(synthetic):
 @pytest.mark.parametrize("depth", [1, 20, 100, 101, 1200])
 @pytest.mark.parametrize("container", ["array", "object", "mixed"])
 def test_json_nesting_limit_is_explicit_and_parser_independent(tmp_path, depth, container):
-    from validation.mechanism_research_20261030.observation_intake import _load_json
+    from research.mechanism_research_20261030.observation_intake import _load_json
 
     raw = '"brackets [ { and escaped quote \\" are text"'
     for index in range(depth):
@@ -356,9 +356,9 @@ def test_json_nesting_limit_is_explicit_and_parser_independent(tmp_path, depth, 
 
 
 def run_cli(plan_path, packet_path, root):
-    command = [sys.executable, "-m", "validation.mechanism_research_20261030.observation_intake",
+    command = [sys.executable, "-m", "research.mechanism_research_20261030.observation_intake",
                "--plan", str(plan_path), "--packet", str(packet_path), "--evidence-root", str(root), "--as-of", AS_OF]
-    result = subprocess.run(command, cwd=Path(__file__).parent, capture_output=True, text=True,
+    result = subprocess.run(command, cwd=Path(__file__).resolve().parents[1], capture_output=True, text=True,
                             env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}, check=False)
     assert result.returncode == 2 and not result.stderr
     report = json.loads(result.stdout)

@@ -45,8 +45,8 @@ python -m validation.mechanism_research_20261030.active_value_bound \
   --output "$NEW_BOUNDS_CSV" --receipt "$NEW_FREEZE_JSON"
 python -m validation.mechanism_research_20261030.score_active_value_bound \
   --bounds "$NEW_BOUNDS_CSV" \
-  --official validation/exact_parity_20261030/official.csv \
-  --calendar validation/exact_parity_20261030/calendar.csv --out "$NEW_SCORE_JSON"
+  --official research/exact_parity_20261030/official.csv \
+  --calendar research/exact_parity_20261030/calendar.csv --out "$NEW_SCORE_JSON"
 ```
 
 正式评分器固定了原始预测收据中的下界 CSV 摘要 `4bafb34e9da286d7ba46f5543bdc3748bf3bb591a7fd5667753a97c2e140c752`，以及已披露标签和交易日历的摘要。换文件后重算一个 SHA-256 不能替换这些标识。持有原始收据时，可加 `--freeze-receipt "$ORIGINAL_FREEZE_JSON"` 核验原件；新复跑的收据含不同的时间和路径，不是原件。核验这些输入不能证明公式复刻。

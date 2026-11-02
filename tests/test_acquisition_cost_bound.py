@@ -9,9 +9,9 @@ import sys
 import pytest
 
 from test_active_value_bound import make_snapshot, panel, records, series
-from validation.mechanism_research_20261030 import acquisition_cost_bound as cost
-from validation.mechanism_research_20261030 import active_value_bound as spot
-from validation.mechanism_research_20261030 import market_snapshot as snapshot
+from research.mechanism_research_20261030 import acquisition_cost_bound as cost
+from research.mechanism_research_20261030 import active_value_bound as spot
+from research.mechanism_research_20261030 import market_snapshot as snapshot
 
 
 def basis(volume, low, vwap, high, close, *, shares=100, symbol="600000.SH", factor=1):
@@ -115,7 +115,7 @@ def test_cli_market_only_byte_freeze_fresh_output_and_authenticated_data(tmp_pat
     pin = make_snapshot(root)
     decoy = root / "official.csv"  # Synthetic poison, never a historical target.
     decoy.write_text("fabricated 123")
-    module = "validation.mechanism_research_20261030.acquisition_cost_bound"
+    module = "research.mechanism_research_20261030.acquisition_cost_bound"
     guard = """import os, pathlib, runpy, sys
 root, output = map(pathlib.Path, sys.argv[1:3]); module = sys.argv[3]
 def audit(event, args):
@@ -130,7 +130,7 @@ sys.addaudithook(audit); sys.argv = [module, *sys.argv[4:]]; runpy.run_module(mo
     def call(output, receipt, sha=pin):
         return subprocess.run([sys.executable, "-B", "-c", guard, str(root), str(output), module, "--root", str(root),
                                "--manifest-sha256", sha, "--output", str(output), "--receipt", str(receipt)],
-                              cwd=Path(__file__).parent, capture_output=True, text=True)
+                              cwd=Path(__file__).resolve().parents[1], capture_output=True, text=True)
 
     out, proof = tmp_path/"pred.csv", tmp_path/"receipt.json"
     result = call(out, proof)

@@ -1,8 +1,8 @@
-"""Tests for the deployable 0AMV implementation (`amv.py`).
+"""Tests for the deployable 0AMV implementation (`compass_0amv`).
 
 Run with pytest, or directly:
 
-    python3 validation/autoresearch/test_amv.py
+    python3 tests/test_amv.py
 
 Covers the recursion itself, the index construction, causality, agreement
 with the research harness, and the end-to-end accuracy on the official
@@ -21,11 +21,13 @@ try:
 except ImportError:  # pytest is optional; the __main__ runner below works without it
     pytest = None
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-if HERE not in sys.path:
-    sys.path.insert(0, HERE)
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+RESEARCH = os.path.join(ROOT, "research", "autoresearch")
+for _path in (ROOT, RESEARCH):
+    if _path not in sys.path:
+        sys.path.insert(0, _path)
 
-import amv  # noqa: E402
+from compass_0amv import amv  # noqa: E402
 from evaluate import load_official  # noqa: E402
 from model import build_panel, market_mask, model_components  # noqa: E402
 from spec import FINAL_SPEC  # noqa: E402
@@ -284,8 +286,8 @@ def test_cli_matches_the_library():
             w.writerow(["trade_date", "ts_code", "close", "vol", "float_share"])
             w.writerows(rows)
         subprocess.run(
-            [sys.executable, os.path.join(HERE, "amv.py"), "--input", src, "--out", dst],
-            check=True,
+            [sys.executable, "-m", "compass_0amv", "--input", src, "--out", dst],
+            check=True, cwd=ROOT,
         )
         with open(dst, newline="", encoding="utf-8") as fh:
             out = list(csv.DictReader(fh))
@@ -327,9 +329,9 @@ def test_scale_moves_the_level_but_not_the_change():
             w.writerows(rows)
         for dst, extra in ((raw, []), (scaled, ["--scale", str(amv.OFFICIAL_LEVEL_SCALE)])):
             subprocess.run(
-                [sys.executable, os.path.join(HERE, "amv.py"),
+                [sys.executable, "-m", "compass_0amv",
                  "--input", src, "--out", dst, *extra],
-                check=True,
+                check=True, cwd=ROOT,
             )
         with open(raw, newline="", encoding="utf-8") as fh:
             a = list(csv.DictReader(fh))

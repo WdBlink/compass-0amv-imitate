@@ -33,10 +33,10 @@
 在仓库根目录执行。核验器只使用 Python 标准库。
 
 ```bash
-python validation/verify_exact_parity.py \
-  --official validation/exact_parity_20261030/official.csv \
-  --predictions validation/exact_parity_20261030/predictions_amount_only.csv \
-  --calendar validation/exact_parity_20261030/calendar.csv \
+python tools/verify_exact_parity.py \
+  --official research/exact_parity_20261030/official.csv \
+  --predictions research/exact_parity_20261030/predictions_amount_only.csv \
+  --calendar research/exact_parity_20261030/calendar.csv \
   --output /tmp/amount_only_parity.json
 ```
 
@@ -55,7 +55,7 @@ python validation/verify_exact_parity.py \
 ## 从本地研究数据重建预测
 
 ```bash
-python validation/export_exact_inputs.py \
+python tools/export_exact_inputs.py \
   --official /path/to/local/official.csv \
   --market /path/to/local/market_prices.csv \
   --output /tmp/new-parity-inputs

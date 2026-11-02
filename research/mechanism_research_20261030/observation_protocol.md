@@ -164,7 +164,7 @@
 在仓库根目录运行以下模块。路径为调用者的私有文件，命令不写结果文件。
 
 ```sh
-PYTHONDONTWRITEBYTECODE=1 /opt/homebrew/bin/python3.11 -m validation.mechanism_research_20261030.observation_intake \
+PYTHONDONTWRITEBYTECODE=1 /opt/homebrew/bin/python3.11 -m research.mechanism_research_20261030.observation_intake \
   --plan /private/intake-plan.json \
   --packet /private/intake-packet.json \
   --evidence-root /private \

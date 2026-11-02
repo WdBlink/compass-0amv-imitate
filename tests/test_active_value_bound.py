@@ -11,8 +11,8 @@ import sys
 
 import pytest
 
-from validation.mechanism_research_20261030 import active_value_bound as av
-from validation.mechanism_research_20261030 import market_snapshot as snap
+from research.mechanism_research_20261030 import active_value_bound as av
+from research.mechanism_research_20261030 import market_snapshot as snap
 
 
 def records(symbol="600000.SH", *, price=10, shares=10**8, volume=10**7, factor=1):
@@ -218,7 +218,7 @@ def test_real_cli_freezes_then_refuses_overwrite_corruption_and_nonmarket_file_r
     digest = make_snapshot(root)
     decoy = root / "official.csv"
     decoy.write_text("unrelated numbers")
-    module = "validation.mechanism_research_20261030.active_value_bound"
+    module = "research.mechanism_research_20261030.active_value_bound"
     # Abort on any attempt to read or write the decoy. Both runs must also be byte-identical.
     guarded = """import os, runpy, sys
 decoy, module = sys.argv[1:3]
@@ -233,7 +233,7 @@ runpy.run_module(module, run_name='__main__')
         command = [sys.executable, "-B", "-c", guarded, str(decoy), module] if guard else [sys.executable, "-B", "-m", module]
         return subprocess.run([*command, "--root", str(root), "--manifest-sha256", pin,
                                "--output", str(out), "--receipt", str(receipt)],
-                              cwd=Path(__file__).resolve().parent, capture_output=True, text=True)
+                              cwd=Path(__file__).resolve().parents[1], capture_output=True, text=True)
 
     out, receipt = tmp_path/"bound.csv", tmp_path/"receipt.json"
     done = call(out, receipt, guard=True)

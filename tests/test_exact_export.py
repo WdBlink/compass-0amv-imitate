@@ -4,8 +4,8 @@ from decimal import Decimal, localcontext
 import pandas as pd
 import pytest
 
-from validation.export_exact_inputs import export_inputs
-from validation.verify_exact_parity import verify_exact_parity
+from tools.export_exact_inputs import export_inputs
+from tools.verify_exact_parity import verify_exact_parity
 
 
 def inputs(tmp_path: Path) -> tuple[Path, Path]:
@@ -91,7 +91,7 @@ def test_official_label_decimal_digits_are_preserved(tmp_path):
 
 
 def test_fixed_scale_positive_amount_smoothing_cannot_fit_official_signs():
-    labels = pd.read_csv(Path(__file__).parent / "validation/exact_parity_20261030/official.csv", dtype=str)
+    labels = pd.read_csv(Path(__file__).resolve().parents[1] / "research/exact_parity_20261030/official.csv", dtype=str)
     labels = labels.set_index("date")
     d = Decimal
     with localcontext() as context:
@@ -108,7 +108,7 @@ def test_fixed_scale_positive_amount_smoothing_cannot_fit_official_signs():
 
 @pytest.mark.parametrize("name,mismatches", [("amount_only", 16), ("sse_price_adjusted", 10)])
 def test_published_baselines_fail_the_exact_gate(name, mismatches):
-    root = Path(__file__).parent / "validation/exact_parity_20261030"
+    root = Path(__file__).resolve().parents[1] / "research/exact_parity_20261030"
     result = verify_exact_parity(root / "official.csv", root / f"predictions_{name}.csv", root / "calendar.csv")
     assert result["strict_gate"] == "fail"
     assert result["official_formula_replication"] == "not_established"

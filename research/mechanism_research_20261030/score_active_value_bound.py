@@ -11,8 +11,8 @@ import json
 from pathlib import Path
 import re
 
-from validation.mechanism_research_20261030.active_value_bound import COLUMNS, EXCLUSIONS
-from validation.verify_exact_parity import LEVEL_HALF, _number, _read
+from research.mechanism_research_20261030.active_value_bound import COLUMNS, EXCLUSIONS
+from tools.verify_exact_parity import LEVEL_HALF, _number, _read
 
 
 SCOPES = ("SH", "SH_SZ")

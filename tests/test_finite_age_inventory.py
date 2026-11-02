@@ -6,7 +6,7 @@ from fractions import Fraction as F
 
 import pytest
 
-from validation.mechanism_research_20261030.finite_age_inventory import StockDay, calculate_finite_age
+from research.mechanism_research_20261030.finite_age_inventory import StockDay, calculate_finite_age
 
 
 def rows(volumes=(10, 20, 0, 0), prices=(10, 20, 30, 40)):

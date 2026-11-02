@@ -3,8 +3,8 @@ from datetime import date
 
 import pytest
 
-from validation.mechanism_research_20261030 import active_value_bound, acquisition_cost_bound, overlap_bound
-from validation.mechanism_research_20261030 import market_snapshot
+from research.mechanism_research_20261030 import active_value_bound, acquisition_cost_bound, overlap_bound
+from research.mechanism_research_20261030 import market_snapshot
 
 
 @pytest.mark.parametrize("calculate", [active_value_bound.calculate_bounds, acquisition_cost_bound.calculate_costs,

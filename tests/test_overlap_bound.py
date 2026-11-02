@@ -12,9 +12,9 @@ import sys
 import pytest
 
 from test_active_value_bound import at, make_snapshot, panel, records, series
-from validation.mechanism_research_20261030 import active_value_bound as spot
-from validation.mechanism_research_20261030 import market_snapshot as snap
-from validation.mechanism_research_20261030 import overlap_bound as overlap
+from research.mechanism_research_20261030 import active_value_bound as spot
+from research.mechanism_research_20261030 import market_snapshot as snap
+from research.mechanism_research_20261030 import overlap_bound as overlap
 
 
 def rows(panels):
@@ -129,7 +129,7 @@ runpy.run_module(module, run_name='__main__')
                                "--root", str(root), "--manifest-sha256", m, "--calendar-sha256", c,
                                "--protocol-sha256", snap.digest(b"synthetic overlap protocol"),
                                "--output", str(out), "--receipt", str(receipt)],
-                              cwd=Path(__file__).resolve().parent, capture_output=True, text=True)
+                              cwd=Path(__file__).resolve().parents[1], capture_output=True, text=True)
 
     out, receipt = tmp_path / "bound.csv", tmp_path / "receipt.json"
     for m, c in (("0"*64, calendar), (pin, "0"*64)):

@@ -6,7 +6,7 @@ from decimal import Decimal
 
 import pytest
 
-from validation.mechanism_research_20261030 import market_snapshot as m
+from research.mechanism_research_20261030 import market_snapshot as m
 
 
 def daily(**updates):

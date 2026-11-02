@@ -5,7 +5,7 @@ from math import log, prod
 
 import pytest
 
-from validation.mechanism_research_20261030.display_measurement import compare_display
+from research.mechanism_research_20261030.display_measurement import compare_display
 
 
 def cyf(prediction, displayed, quantum="0.1"):

@@ -8,7 +8,7 @@ import sys
 
 import pytest
 
-from validation.verify_exact_parity import main, verify_exact_parity
+from tools.verify_exact_parity import main, verify_exact_parity
 
 
 DATES = ["2026-01-02", "2026-01-05", "2026-01-06", "2026-01-07"]
@@ -191,7 +191,7 @@ def test_calendar_requires_first_predecessor_but_accepts_contiguous_warmup(input
 
 
 def test_cli_from_unrelated_directory_and_exit_codes(inputs, tmp_path):
-    script = Path(__file__).parent / "validation" / "verify_exact_parity.py"
+    script = Path(__file__).resolve().parents[1] / "tools" / "verify_exact_parity.py"
     output = tmp_path / "report.json"
     args = [flag for pair in zip(("--official", "--predictions", "--calendar"), map(str, inputs)) for flag in pair]
     args += ["--output", str(output)]

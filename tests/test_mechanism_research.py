@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from validation.mechanism_research_20261030.stock_inventory import calculate_panel
+from research.mechanism_research_20261030.stock_inventory import calculate_panel
 
 
 @pytest.fixture

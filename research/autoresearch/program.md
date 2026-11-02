@@ -18,11 +18,11 @@ curve fit.
 
 Writable:
 
-- `validation/autoresearch/**`
+- `research/autoresearch/**`
 
 Read-only inputs (never modified):
 
-- `validation/exact_parity_20261030/official.csv` — the official labels
+- `research/exact_parity_20261030/official.csv` — the official labels
   (64 rows). **Read only inside the scorer**, never inside the model.
 - `/Users/wdblink/Data/datasets/derived/compass-0amv/r2-20261030/` — the
   frozen full-market Tushare snapshot, 121 trading days
@@ -109,7 +109,7 @@ while making the level scale factor drift.
 
 ## Verification
 
-    python3 validation/autoresearch/experiment.py --spec '<json>' --desc '<text>'
+    python3 research/autoresearch/experiment.py --spec '<json>' --desc '<text>'
 
 must print a line
 
@@ -148,8 +148,8 @@ to stderr, and append one row to `results.tsv`.
     scan.py         landscape scan
     verify_model.py the five-check verification battery
     diagnose_*.py   structural probes (drift of the level ratio, mixes)
-    amv.py          the deployable implementation (label free)
-    test_amv.py     tests for the deployable implementation
+    amv.py          (moved) the deployable implementation now lives in
+                    compass_0amv/amv.py, with its tests in tests/test_amv.py
     compare_table.py  64-day model-vs-official table, raw and aligned
     results.tsv     the iteration log
 
