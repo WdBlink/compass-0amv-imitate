@@ -10,7 +10,6 @@ from collections import Counter, deque
 from collections.abc import Iterable, Iterator
 import csv
 from dataclasses import dataclass
-from datetime import date
 from fractions import Fraction
 import io
 import json
@@ -128,7 +127,7 @@ def calculate_costs(calendar: Iterable[str], panels: Iterable[spot.Panel], *,
             for n in windows:
                 c = counts["SH"][n] if market == "SH" else counts["SH"][n] + counts["SZ"][n]
                 excluded = sum(c[reason] for reason in spot.EXCLUSIONS)
-                yield dict(date=date.fromisoformat(day).isoformat(), market=market, window=n, eligible=c["eligible"],
+                yield dict(date=snapshot.parse_date(day).isoformat(), market=market, window=n, eligible=c["eligible"],
                            low_yi=_value(c["low"]), vwap_yi=_value(c["vwap"]), high_yi=_value(c["high"]),
                            seen_asof=excluded + c["eligible"], excluded=excluded,
                            **{"ex_" + reason: c[reason] for reason in spot.EXCLUSIONS})
@@ -148,7 +147,7 @@ def snapshot_costs(root: Path, manifest_sha256: str) -> list[dict]:
                 raise ValueError(f"empty endpoint response for open date {day}")
             yield spot.Panel(day, *groups)
 
-    start = date.fromisoformat(spot.REPORT_START).isoformat()
+    start = snapshot.parse_date(spot.REPORT_START).isoformat()
     rows = [r for r in calculate_costs(days, panels()) if r["date"] >= start]
     for status in "LDP":
         snapshot.load_group(root, manifest, f"stock_basic/{status}")  # Authenticate; never use today's membership.

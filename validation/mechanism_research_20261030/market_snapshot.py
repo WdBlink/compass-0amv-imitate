@@ -46,10 +46,15 @@ def utc() -> str:
     return dt.datetime.now(dt.timezone.utc).isoformat()
 
 
-def valid_date(value: object) -> str:
-    if not isinstance(value, str) or not re.fullmatch(r"\d{8}", value):
+def parse_date(value: object) -> dt.date:
+    """Parse only the provider's ASCII YYYYMMDD calendar-date contract."""
+    if not isinstance(value, str) or not re.fullmatch(r"[0-9]{8}", value):
         raise ValueError("invalid date")
-    dt.datetime.strptime(value, "%Y%m%d")
+    return dt.date(int(value[:4]), int(value[4:6]), int(value[6:]))
+
+
+def valid_date(value: object) -> str:
+    parse_date(value)
     return value
 
 

@@ -3,6 +3,7 @@ import argparse
 from collections import Counter
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
+import errno
 import hashlib
 import json
 import os
@@ -16,6 +17,8 @@ from .display_measurement import _exact
 _IDENTITY = ("symbol", "date", "indicator", "period")
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 _SOURCE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z")
+# Count nested object/array containers, including the root container.
+_MAX_JSON_DEPTH = 100
 
 
 @dataclass
@@ -134,7 +137,10 @@ def _evidence(reference, root, sources):
         if not resolved.is_relative_to(root) or not stat.S_ISREG(resolved.stat().st_mode):
             raise ValueError("evidence must be a regular file inside the evidence root")
         with resolved.open("rb") as stream:
-            actual = hashlib.file_digest(stream, "sha256").hexdigest()
+            checksum = hashlib.sha256()
+            for chunk in iter(lambda: stream.read(256 * 1024), b""):
+                checksum.update(chunk)
+            actual = checksum.hexdigest()
     except OSError as exc:
         raise ValueError(f"evidence reference is missing or unreadable ({_input_error(exc)})") from exc
     if actual != digest:
@@ -253,9 +259,15 @@ def _validate_plan(plan, evidence_root, *, as_of=None):
                 _known_text(case[field], f"planned {field}")
         expected[key] = case
     try:
-        root = Path(evidence_root).resolve()
+        root = Path(evidence_root).resolve(strict=True)
+    except (FileNotFoundError, NotADirectoryError) as exc:
+        raise ValueError("evidence root must be a local directory") from exc
     except RuntimeError as exc:
         raise ValueError("evidence root cannot be resolved") from exc
+    except OSError as exc:
+        if exc.errno == errno.ELOOP:
+            raise ValueError("evidence root cannot be resolved") from exc
+        raise
     if not root.is_dir():
         raise ValueError("evidence root must be a local directory")
     sources = {}
@@ -360,9 +372,19 @@ def _unique_object(pairs):
 def _load_json(filename):
     with Path(filename).open(encoding="utf-8") as stream:
         try:
-            return json.load(stream, object_pairs_hook=_unique_object)
+            value = json.load(stream, object_pairs_hook=_unique_object)
         except RecursionError as exc:
             raise ValueError("JSON nesting is too deep") from exc
+    # Do not depend on the interpreter's JSON parser recursion limit.
+    pending = [(value, 1)]
+    while pending:
+        node, depth = pending.pop()
+        if isinstance(node, (dict, list)):
+            if depth > _MAX_JSON_DEPTH:
+                raise ValueError("JSON nesting is too deep")
+            children = node.values() if isinstance(node, dict) else node
+            pending.extend((child, depth + 1) for child in children if isinstance(child, (dict, list)))
+    return value
 
 
 def main(argv=None):

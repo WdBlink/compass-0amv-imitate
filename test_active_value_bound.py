@@ -1,6 +1,6 @@
 import csv
 from dataclasses import replace
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from fractions import Fraction
 import io
@@ -40,7 +40,7 @@ def rows(panels):
 
 
 def at(result, day, n=5, market="SH"):
-    key = date.fromisoformat(day).isoformat()
+    key = datetime.strptime(day, "%Y%m%d").date().isoformat()
     return next(r for r in result if (r["date"], r["market"], r["window"]) == (key, market, n))
 
 
@@ -182,9 +182,9 @@ def test_calendar_cannot_skip_reorder_duplicate_or_misdate_a_panel():
 def make_snapshot(root):
     root.mkdir()
     (root / "raw").mkdir()
-    first, last = map(date.fromisoformat, (snap.START, snap.END))
+    first, last = (datetime.strptime(value, "%Y%m%d").date() for value in (snap.START, snap.END))
     civil = [(first + timedelta(days=i)).strftime("%Y%m%d") for i in range((last-first).days+1)]
-    weekdays = [v for v in civil if date.fromisoformat(v).weekday() < 5]
+    weekdays = [v for v in civil if datetime.strptime(v, "%Y%m%d").date().weekday() < 5]
     sessions = [v for v in weekdays if v < av.REPORT_START][-57:]
     sessions += [v for v in weekdays if v >= av.REPORT_START][:63] + [av.REPORT_END]
     manifest = dict(requested_start=snap.START, requested_end=snap.END, fields=snap.FIELDS, groups={})

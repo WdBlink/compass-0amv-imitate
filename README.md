@@ -120,7 +120,7 @@ legacy = compute_0amv(
 验证脚本通过东方财富历史日线接口分别获取上证指数和深证综指成交额，再按交易日求和。原始分市场列 `sh_amount`、`sz_amount` 会保留在 DataFrame 中，便于审计聚合口径。
 
 ```bash
-# 运行全部测试
+# 运行公开测试（不需要私有行情；私有集成测试明确跳过）
 python -m pytest -q
 
 # 生成与 2024 年原版截图相同时间窗口的并排对照图
@@ -132,6 +132,18 @@ python validation/render_imitate_kline.py
 # 重新计算多空区间及其独立评估指标
 python validation/detect_regimes.py
 ```
+
+### 私有面板集成测试
+
+公开测试包含非空合成面板的模型一致性和因果性检查，不把空数组比较视为模型复现成功。只有持有离线快照时才显式启用以下三项真实面板测试：
+
+```bash
+COMPASS_RUN_PRIVATE_TESTS=1 \
+COMPASS_SNAPSHOT_ROOT=/path/to/offline/snapshot \
+python -m pytest -q validation/autoresearch/test_amv.py
+```
+
+快照目录须包含 `raw/`。未启用时三项测试明确跳过；启用后缺目录、空数据或缺必要日期会失败，不会静默跳过。显式配置的数据根目录不复用或改写默认共享缓存。公开测试通过不代表私有样本精度、官方算法或盲测得到验证。
 
 ### 同窗口形态对照
 

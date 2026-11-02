@@ -121,7 +121,8 @@ def test_opposite_signal_is_known_mismatch_even_if_threshold_label_ambiguous(inp
 @pytest.mark.parametrize("fault", ["duplicate", "unsorted", "invalid_date", "empty", "header_only", "extra_column"])
 def test_invalid_dates_and_structure(inputs, index, fault):
     path = inputs[index]
-    rows = list(csv.reader(path.open()))
+    with path.open(newline="", encoding="utf-8") as stream:
+        rows = list(csv.reader(stream))
     if fault == "duplicate":
         rows.append(rows[-1])
     elif fault == "unsorted":
@@ -182,7 +183,8 @@ def test_calendar_requires_first_predecessor_but_accepts_contiguous_warmup(input
     replace(inputs[2], "date\n", "date\n2025-12-31\n")
     assert verify_exact_parity(*inputs)["strict_gate"] == "pass"
     for path in inputs[1:]:
-        rows = list(csv.reader(path.open()))
+        with path.open(newline="", encoding="utf-8") as stream:
+            rows = list(csv.reader(stream))
         write(path, ",".join(rows[0]), rows[3:])
     with pytest.raises(ValueError, match="preceding market day"):
         verify_exact_parity(*inputs)

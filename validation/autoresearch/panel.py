@@ -67,12 +67,12 @@ class Panel:
         return int(idx[0])
 
 
-def _load_endpoint(prefix: str) -> dict[str, dict[str, dict]]:
+def _load_endpoint(prefix: str, raw_dir: str) -> dict[str, dict[str, dict]]:
     """prefix -> {trade_date -> {ts_code -> {field: value}}}"""
     out: dict[str, dict[str, dict]] = {}
     # `daily_*` would also match `daily_basic_*`; anchor on the date prefix.
     pattern = f"{prefix}_[0-9]*.json"
-    for path in sorted(glob.glob(os.path.join(RAW_DIR, pattern))):
+    for path in sorted(glob.glob(os.path.join(raw_dir, pattern))):
         with open(path, "r", encoding="utf-8") as fh:
             payload = json.load(fh)
         if payload.get("code") != 0:
@@ -102,26 +102,59 @@ def _board_of(code: str) -> str:
     return "other"
 
 
-def build_panel(use_cache: bool = True) -> Panel:
-    if use_cache and os.path.exists(CACHE_PATH):
-        z = np.load(CACHE_PATH, allow_pickle=False)
-        return Panel(
-            dates=z["dates"], codes=z["codes"], close=z["close"], adj_factor=z["adj_factor"],
-            vol_shares=z["vol_shares"],
-            amount_cny=z["amount_cny"], float_shares=z["float_shares"],
-            free_shares=z["free_shares"], circ_mv=z["circ_mv"],
-            turnover_rate=z["turnover_rate"], board=z["board"],
-        )
+def _check_dates(dates, required_dates):
+    missing = sorted(set(required_dates) - set(dates))
+    if missing:
+        raise ValueError(f"panel missing required dates: {', '.join(missing)}")
 
-    daily = _load_endpoint("daily")
-    basic = _load_endpoint("daily_basic")
-    adjf = _load_endpoint("adj_factor")
+
+def _check_usable(panel):
+    for name, values in vars(panel).items():
+        shape = ((panel.n_dates,) if name == "dates" else
+                 (panel.n_stocks,) if name in ("codes", "board") else
+                 (panel.n_dates, panel.n_stocks))
+        if values.shape != shape:
+            raise ValueError(f"panel {name} shape {values.shape} != {shape}")
+    # Missing individual observations remain NaN (suspensions/listings).
+    usable = (np.isfinite(panel.close) & (panel.close > 0)
+              & np.isfinite(panel.float_shares) & (panel.float_shares > 0)
+              & np.isfinite(panel.vol_shares))
+    if not usable.any():
+        raise ValueError("panel has no usable price/float/volume observations")
+
+
+def build_panel(use_cache: bool = True, *, snapshot_root: str | os.PathLike | None = None,
+                required_dates=()) -> Panel:
+    """Load offline data; explicit/environment roots bypass the shared cache.
+
+    Configured roots neither read nor overwrite the legacy default cache.
+    The function argument takes precedence over COMPASS_SNAPSHOT_ROOT.
+    """
+    root = snapshot_root if snapshot_root is not None else os.environ.get("COMPASS_SNAPSHOT_ROOT")
+    raw_dir = os.path.join(root, "raw") if root is not None else RAW_DIR
+    if use_cache and root is None and os.path.exists(CACHE_PATH):
+        with np.load(CACHE_PATH, allow_pickle=False) as z:
+            if not z["dates"].size or not z["codes"].size:
+                raise ValueError("empty panel cache")
+            _check_dates(z["dates"], required_dates)
+            panel = Panel(**{name: z[name] for name in Panel.__dataclass_fields__})
+        _check_usable(panel)
+        return panel
+
+    if not os.path.isdir(raw_dir):
+        raise FileNotFoundError(f"snapshot raw directory not found: {raw_dir}; set COMPASS_SNAPSHOT_ROOT")
+    daily = _load_endpoint("daily", raw_dir)
+    basic = _load_endpoint("daily_basic", raw_dir)
+    adjf = _load_endpoint("adj_factor", raw_dir)
 
     dates = sorted(set(daily) & set(basic))
     codes = sorted({c for d in dates for c in daily[d]})
     di = {d: i for i, d in enumerate(dates)}
     ci = {c: i for i, c in enumerate(codes)}
     nd, ns = len(dates), len(codes)
+    if not nd or not ns:
+        raise ValueError("empty raw panel: daily and daily_basic must overlap")
+    _check_dates(dates, required_dates)
 
     close = np.full((nd, ns), np.nan)
     adj = np.full((nd, ns), np.nan)
@@ -158,7 +191,9 @@ def build_panel(use_cache: bool = True) -> Panel:
                   vol_shares=vol,
                   amount_cny=amt, float_shares=fsh, free_shares=frsh, circ_mv=cmv,
                   turnover_rate=tor, board=board)
-    np.savez_compressed(CACHE_PATH, dates=panel.dates, codes=panel.codes, close=close,
+    _check_usable(panel)
+    if root is None:
+        np.savez_compressed(CACHE_PATH, dates=panel.dates, codes=panel.codes, close=close,
                         adj_factor=adj,
                         vol_shares=vol, amount_cny=amt, float_shares=fsh, free_shares=frsh,
                         circ_mv=cmv, turnover_rate=tor, board=board)

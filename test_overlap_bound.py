@@ -1,6 +1,6 @@
 import csv
 from dataclasses import replace
-from datetime import date
+from datetime import datetime
 from fractions import Fraction
 from itertools import islice
 import json
@@ -112,7 +112,7 @@ def test_cli_authenticates_market_calendar_hashes_and_never_reads_decoy(tmp_path
     pin = make_snapshot(root)
     manifest = json.loads((root / "manifest.json").read_bytes())
     days = spot._calendar(root, manifest)
-    calendar = snap.digest(("date\n" + "".join(f"{date.fromisoformat(d)}\n" for d in days[-65:])).encode())
+    calendar = snap.digest(("date\n" + "".join(f"{datetime.strptime(d, '%Y%m%d').date()}\n" for d in days[-65:])).encode())
     decoy = root / "unrelated.csv"
     decoy.write_text("unused")
     guarded = """import os, runpy, sys

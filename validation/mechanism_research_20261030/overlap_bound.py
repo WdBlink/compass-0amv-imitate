@@ -11,7 +11,6 @@ from collections import Counter, deque
 from collections.abc import Iterable, Iterator
 import csv
 from dataclasses import dataclass, field
-from datetime import date
 from fractions import Fraction
 import io
 import json
@@ -95,7 +94,7 @@ def calculate_bounds(calendar: Iterable[str], panels: Iterable[spot.Panel]) -> I
             for n in spot.WINDOWS:
                 c = counts["SH"][n] if market == "SH" else counts["SH"][n] + counts["SZ"][n]
                 excluded = sum(c[r] for r in spot.EXCLUSIONS)
-                yield dict(date=date.fromisoformat(day).isoformat(), market=market, window=n, eligible=c["eligible"],
+                yield dict(date=snapshot.parse_date(day).isoformat(), market=market, window=n, eligible=c["eligible"],
                            lower_yi=_yi(c["lower_ticks"]), upper_covered_yi=_yi(c["upper_covered_ticks"]),
                            seen_asof=excluded + c["eligible"], excluded=excluded,
                            **{"ex_" + r: c[r] for r in spot.EXCLUSIONS})
@@ -109,7 +108,7 @@ def snapshot_bounds(root: Path, manifest_sha256: str, calendar_sha256: str) -> l
     days = spot._calendar(root, manifest)
     first = days.index(spot.REPORT_START)
     # The precommitted dates file contains the previous session, then the 64 development sessions.
-    calendar = ("date\n" + "".join(f"{date.fromisoformat(d)}\n" for d in days[first-1:])).encode()
+    calendar = ("date\n" + "".join(f"{snapshot.parse_date(d)}\n" for d in days[first-1:])).encode()
     if snapshot.digest(calendar) != calendar_sha256:
         raise ValueError("market-derived development calendar hash mismatch")
 
@@ -120,7 +119,7 @@ def snapshot_bounds(root: Path, manifest_sha256: str, calendar_sha256: str) -> l
                 raise ValueError(f"empty endpoint response for open date {day}")
             yield spot.Panel(day, *groups)
 
-    start = date.fromisoformat(spot.REPORT_START).isoformat()
+    start = snapshot.parse_date(spot.REPORT_START).isoformat()
     result = [r for r in calculate_bounds(days, panels()) if r["date"] >= start]
     for status in "LDP":
         snapshot.load_group(root, manifest, f"stock_basic/{status}")  # Authenticate, never use current listing status.

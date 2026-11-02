@@ -86,6 +86,20 @@ def test_valid_synthetic_packet_is_only_ready_for_independent_review(synthetic):
     assert before == synthetic[:2]
 
 
+@pytest.mark.parametrize("size", [0, 262145])
+def test_evidence_sha256_without_file_digest(synthetic, monkeypatch, size):
+    monkeypatch.delattr(hashlib, "file_digest", raising=False)
+    _, packet, root = synthetic
+    source = packet["observations"][0]["source"]
+    content = b"x" * size
+    (root / source["path"]).write_bytes(content)
+    for row in packet["observations"]:
+        row["source"]["sha256"] = hashlib.sha256(content).hexdigest()
+    assert check(synthetic)["status"] == "ready_for_independent_review"
+    (root / source["path"]).write_bytes(content + b"changed")
+    assert_invalid(check(synthetic))
+
+
 def test_case_and_plan_order_are_immaterial(synthetic):
     plan, packet, _ = synthetic
     before = check(synthetic)
@@ -320,6 +334,27 @@ def test_cli_stdout_only_and_invalid_duplicate_json_keys(synthetic):
     assert json.loads(result.stdout)["errors"] == ["JSON contains duplicate object keys"]
 
 
+@pytest.mark.parametrize("depth", [1, 20, 100, 101, 1200])
+@pytest.mark.parametrize("container", ["array", "object", "mixed"])
+def test_json_nesting_limit_is_explicit_and_parser_independent(tmp_path, depth, container):
+    from validation.mechanism_research_20261030.observation_intake import _load_json
+
+    raw = '"brackets [ { and escaped quote \\" are text"'
+    for index in range(depth):
+        raw = ('{"child":' + raw + '}') if container == "object" or (
+            container == "mixed" and index % 2) else '[' + raw + ']'
+    filename = tmp_path / "nested.json"
+    filename.write_text(raw, encoding="utf-8")
+    if depth > 100:
+        with pytest.raises(ValueError, match="^JSON nesting is too deep$"):
+            _load_json(filename)
+    else:
+        value = _load_json(filename)
+        for _ in range(depth):
+            value = value["child"] if isinstance(value, dict) else value[0]
+        assert value == 'brackets [ { and escaped quote " are text'
+
+
 def run_cli(plan_path, packet_path, root):
     command = [sys.executable, "-m", "validation.mechanism_research_20261030.observation_intake",
                "--plan", str(plan_path), "--packet", str(packet_path), "--evidence-root", str(root), "--as-of", AS_OF]
@@ -337,18 +372,29 @@ def run_cli(plan_path, packet_path, root):
     return report
 
 
-def test_cli_evidence_root_symlink_loop_has_no_trusted_denominator(synthetic):
+@pytest.mark.parametrize("kind,cause", [
+    ("loop", "evidence root cannot be resolved"),
+    ("missing", "evidence root must be a local directory"),
+    ("dangling", "evidence root must be a local directory"),
+    ("file", "evidence root must be a local directory"),
+])
+def test_cli_invalid_evidence_root_has_no_trusted_denominator(synthetic, kind, cause):
     plan, packet, root = synthetic
     plan_path, packet_path = root / "plan.json", root / "packet.json"
     plan_path.write_text(json.dumps(plan), encoding="utf-8")
     packet_path.write_text(json.dumps(packet), encoding="utf-8")
     evidence_root = root / "evidence-root"
-    evidence_root.symlink_to("loop-a")
-    (root / "loop-a").symlink_to("loop-b")
-    (root / "loop-b").symlink_to("loop-a")
+    if kind == "loop":
+        evidence_root.symlink_to("loop-a")
+        (root / "loop-a").symlink_to("loop-b")
+        (root / "loop-b").symlink_to("loop-a")
+    elif kind == "dangling":
+        evidence_root.symlink_to("nonexistent-target")
+    elif kind == "file":
+        evidence_root.write_bytes(b"not a directory")
     report = run_cli(plan_path, packet_path, evidence_root)
     assert "coverage" not in report and "cases" not in report
-    assert report["errors"] == ["evidence root cannot be resolved"]
+    assert report["errors"] == [cause]
     assert str(root) not in json.dumps(report)
 
 

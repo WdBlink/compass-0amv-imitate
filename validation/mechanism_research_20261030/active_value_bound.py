@@ -12,7 +12,7 @@ import csv
 from collections import Counter, deque
 from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass, field
-from datetime import date, timedelta
+from datetime import timedelta
 from decimal import Decimal
 from fractions import Fraction
 import io
@@ -153,7 +153,7 @@ def calculate_bounds(calendar: Iterable[str], panels: Iterable[Panel]) -> Iterat
                 c = counts["SH"][n] if market == "SH" else counts["SH"][n] + counts["SZ"][n]
                 whole, fractional = divmod(c["ticks"], TICKS_PER_YI)
                 excluded = sum(c[reason] for reason in EXCLUSIONS)
-                yield dict(date=date.fromisoformat(day).isoformat(), market=market, window=n,
+                yield dict(date=snapshot.parse_date(day).isoformat(), market=market, window=n,
                            eligible=c["eligible"], lower_yi=f"{whole}.{fractional:012d}",
                            seen_asof=c["eligible"] + excluded, excluded=excluded,
                            **{"ex_" + reason: c[reason] for reason in EXCLUSIONS})
@@ -164,7 +164,7 @@ def _calendar(root: Path, manifest: dict) -> list[str]:
         raise ValueError("unexpected snapshot range")
     if manifest["fields"] != snapshot.FIELDS:
         raise ValueError("unexpected snapshot field contract")
-    start, end = map(date.fromisoformat, (snapshot.START, snapshot.END))
+    start, end = map(snapshot.parse_date, (snapshot.START, snapshot.END))
     civil = {(start + timedelta(days=i)).strftime("%Y%m%d") for i in range((end - start).days + 1)}
     calendars = []
     for exchange in ("SSE", "SZSE"):
@@ -200,7 +200,7 @@ def snapshot_bounds(root: Path, manifest_sha256: str) -> list[dict]:
                 raise ValueError(f"empty endpoint response for open date {day}")
             yield Panel(day, *groups)
 
-    result = [r for r in calculate_bounds(days, panels()) if r["date"] >= date.fromisoformat(REPORT_START).isoformat()]
+    result = [r for r in calculate_bounds(days, panels()) if r["date"] >= snapshot.parse_date(REPORT_START).isoformat()]
     # Verify the unused metadata bytes too, without feeding their current classifications to histories.
     for status in "LDP":
         snapshot.load_group(root, manifest, f"stock_basic/{status}")
