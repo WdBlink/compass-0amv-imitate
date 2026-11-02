@@ -1,0 +1,20 @@
+{
+  "source_official_sha256": "a2f2ffd3462bcffa214a6dcca5bf0a54d67b57cebfc9054d02da71326c3cbd5c",
+  "source_market_sha256": "be12208d138b3d14ef7ad3b5f3060f1bec82faaad1d009d6bf23908d2e5ebf4c",
+  "generator_sha256": "3587abea8a1b707b13d30280e557ffd73cd1a082d459be327cc5ba6c201e82ec",
+  "market_source": "Tushare index_daily: 000001.SH and 399106.SZ; amount * 1000 = yuan",
+  "market_warmup_start": "2023-01-03",
+  "market_rows_used": 925,
+  "official_rows": 64,
+  "prediction_rows": 65,
+  "labels_used_for_prediction_values": false,
+  "label_exposure": "all_64_observations_previously_exposed_to_research",
+  "transcription_review": "ai_visual_checked; human_review_pending",
+  "raw_provider_data_and_device_screenshots": "retained_locally_not_published",
+  "sha256": {
+    "calendar.csv": "de73fe87079197668e5aa6e689907752d5ccf271273a34b3b6704b58d0e677ed",
+    "official.csv": "176e0335f5c062fa3d93951ccb15afcaa83641f0b55da693d8c9fa90d47c75ea",
+    "predictions_amount_only.csv": "1c1622a975dc8526549475a11000691e727149861e0551c0b9c21049300455ac",
+    "predictions_sse_price_adjusted.csv": "d22a67fc306c8423784ed5094b8181cacd896d74361cf6120c651a1e4e60b4b3"
+  }
+}
