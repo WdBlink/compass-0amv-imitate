@@ -3,6 +3,13 @@
 Official labels select scoring dates only. They never fit or initialize predictions.
 Market CSV columns: date, sh_close, sh_amount, sz_amount, amount, in yuan.
 The output is disclosed diagnostic data, not an unseen evaluation set.
+
+The two baselines are the retired market-amount proxies.  They stay here as
+negative controls: both fail the display-precision gate, and that failure is
+the evidence that the official index is not a positive-coefficient smoothing
+of the market turnover.  The formulas are stated in
+research/exact_parity_20261030/README.md and reproduced below, so the control
+stays reproducible without the retired proxy module.
 """
 from __future__ import annotations
 
@@ -11,17 +18,29 @@ from decimal import Decimal
 from fractions import Fraction
 import hashlib
 import json
-import sys
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
-ROOT = Path(__file__).resolve().parents[1]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
 
-from zero_amv import compute_0amv, sma
+def tdx_sma(series: pd.Series, n: int, m: int = 1) -> pd.Series:
+    """通达信 SMA(X, N, M):  Y[0]=X[0];  Y[t]=(M*X[t]+(N-M)*Y[t-1])/N.
+
+    Not a simple or exponential moving average; with m=1 it is the
+    recursion the two baselines below are defined by.
+    """
+    if m < 1 or m > n:
+        raise ValueError(f"SMA requires 1 <= m <= n, got m={m}, n={n}")
+    out = series.copy().astype(float)
+    out.iloc[0] = series.iloc[0]
+    alpha = m / n
+    for i in range(1, len(series)):
+        if pd.isna(series.iloc[i]):
+            out.iloc[i] = out.iloc[i - 1]
+        else:
+            out.iloc[i] = alpha * series.iloc[i] + (1 - alpha) * out.iloc[i - 1]
+    return out
 
 
 def digest(path: Path) -> str:
@@ -67,8 +86,8 @@ def export_inputs(official_path: Path, market_path: Path, output: Path) -> None:
         raise ValueError("market needs preceding history for both proxy variants")
     market = market.loc[:official.index[-1]]
     predictions = {
-        "amount_only": compute_0amv(market, fit_level="lite")["0amv_close"],
-        "sse_price_adjusted": sma(market.sh_amount, 10) * market.sh_close
+        "amount_only": tdx_sma(market["amount"], 10) / 1e7,
+        "sse_price_adjusted": tdx_sma(market.sh_amount, 10) * market.sh_close
         / market.sh_close.shift(1).rolling(5).mean() / 1e7,
     }
     dates = market.index[first - 1:]

@@ -1,11 +1,15 @@
 from pathlib import Path
 from decimal import Decimal, localcontext
+import hashlib
+import json
 
 import pandas as pd
 import pytest
 
-from tools.export_exact_inputs import export_inputs
+from tools.export_exact_inputs import export_inputs, tdx_sma
 from tools.verify_exact_parity import verify_exact_parity
+
+FIXTURE = Path(__file__).resolve().parents[1] / "research/exact_parity_20261030"
 
 
 def inputs(tmp_path: Path) -> tuple[Path, Path]:
@@ -91,7 +95,7 @@ def test_official_label_decimal_digits_are_preserved(tmp_path):
 
 
 def test_fixed_scale_positive_amount_smoothing_cannot_fit_official_signs():
-    labels = pd.read_csv(Path(__file__).resolve().parents[1] / "research/exact_parity_20261030/official.csv", dtype=str)
+    labels = pd.read_csv(FIXTURE / "official.csv", dtype=str)
     labels = labels.set_index("date")
     d = Decimal
     with localcontext() as context:
@@ -108,9 +112,27 @@ def test_fixed_scale_positive_amount_smoothing_cannot_fit_official_signs():
 
 @pytest.mark.parametrize("name,mismatches", [("amount_only", 16), ("sse_price_adjusted", 10)])
 def test_published_baselines_fail_the_exact_gate(name, mismatches):
-    root = Path(__file__).resolve().parents[1] / "research/exact_parity_20261030"
-    result = verify_exact_parity(root / "official.csv", root / f"predictions_{name}.csv", root / "calendar.csv")
+    result = verify_exact_parity(FIXTURE / "official.csv", FIXTURE / f"predictions_{name}.csv", FIXTURE / "calendar.csv")
     assert result["strict_gate"] == "fail"
     assert result["official_formula_replication"] == "not_established"
     assert result["counts"]["numeric_fail"] == 64
     assert result["counts"]["signal_known_mismatches"] == mismatches
+
+
+def test_the_negative_control_formulas_are_pinned():
+    """The two market-amount baselines are the negative controls of this
+    repository.  Pin the recursion so a change to it cannot slip in
+    unnoticed: the published fixture must stay reproducible from it."""
+    assert tdx_sma(pd.Series([1.0, 2.0, 3.0, 4.0, 5.0]), 3, 1).tolist() == [
+        1.0, 1.3333333333333335, 1.888888888888889, 2.5925925925925926, 3.3950617283950617,
+    ]
+
+
+def test_the_published_fixture_matches_its_manifest():
+    """The published fixture is frozen evidence: every file has to keep the
+    hash recorded in the manifest, and the manifest names the generator."""
+    manifest = json.loads((FIXTURE / "manifest.json").read_text())
+    for name, digest in manifest["sha256"].items():
+        assert hashlib.sha256((FIXTURE / name).read_bytes()).hexdigest() == digest, name
+    generator = Path(__file__).resolve().parents[1] / "tools" / "export_exact_inputs.py"
+    assert hashlib.sha256(generator.read_bytes()).hexdigest() == manifest["generator_sha256"]
