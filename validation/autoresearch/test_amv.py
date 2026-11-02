@@ -15,7 +15,11 @@ import os
 import sys
 
 import numpy as np
-import pytest
+
+try:
+    import pytest
+except ImportError:  # pytest is optional; the __main__ runner below works without it
+    pytest = None
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
@@ -30,10 +34,22 @@ from panel import Panel  # noqa: E402
 LAMBDA = amv.DECAY
 
 
+class Skipped(Exception):
+    """Raised by the standalone runner when a test needs pytest or a snapshot."""
+
+
+# pytest's own skip exception, when pytest is installed.  The standalone
+# runner must work without pytest, so the skip channel is a plain tuple.
+_SKIP_EXCEPTIONS = (Skipped,) if pytest is None else (Skipped, pytest.skip.Exception)
+
+
 def _require_private():
     if os.environ.get("COMPASS_RUN_PRIVATE_TESTS") != "1":
-        pytest.skip("private snapshot tests require COMPASS_RUN_PRIVATE_TESTS=1; "
-                    "set COMPASS_SNAPSHOT_ROOT to your offline snapshot")
+        message = ("private snapshot tests require COMPASS_RUN_PRIVATE_TESTS=1; "
+                   "set COMPASS_SNAPSHOT_ROOT to your offline snapshot")
+        if pytest is None:
+            raise Skipped(message)
+        pytest.skip(message)
 
 
 def _checked_mask(panel):
@@ -336,7 +352,7 @@ def _main() -> int:
         try:
             t()
             print(f"PASS {t.__name__}")
-        except pytest.skip.Exception as exc:
+        except _SKIP_EXCEPTIONS as exc:
             skipped += 1
             print(f"SKIP {t.__name__}: {exc}")
         except AssertionError as exc:
