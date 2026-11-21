@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "compass-0amv"
-version = "0.3.0"
+version = "0.3.1"
 description = "Replication of the 指南针 0AMV active-market-value index"
 readme = "README.md"
 requires-python = ">=3.11"

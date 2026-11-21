@@ -191,6 +191,7 @@ def test_synthetic_panel_reproduces_research_model():
     mask = _checked_mask(panel)
     assert mask.tolist() == [True, True, True, False]
     assert amv.DECAY == FINAL_SPEC["decay"]
+    assert amv.INIT_WINDOW == FINAL_SPEC["init_window"]
     for init in ("zero", "steady", "robust"):
         spec = {**FINAL_SPEC, "init": init}
         got = _deployed(panel, init=init)
@@ -203,9 +204,10 @@ def test_synthetic_panel_reproduces_research_model():
 def test_synthetic_panel_causality():
     panel = _synthetic_panel()
     _checked_mask(panel)
-    # Steady initialization uses the FIRST 20 observations (early lookahead).
+    # Steady initialization uses the FIRST init_window observations (early lookahead).
     # Preserve this disclosed historical policy; test it only after that window.
-    for init, cuts in (("zero", (0, 7, 29)), ("steady", (19, 29)), ("robust", (0, 3, 7, 18, 19, 29))):
+    iw = FINAL_SPEC["init_window"]
+    for init, cuts in (("zero", (0, 7, 29)), ("steady", (iw - 1, iw)), ("robust", (0, 3, 7, 18, 19, 29))):
         spec = {**FINAL_SPEC, "init": init}
         for calculate in (lambda p: _deployed(p, init=init), lambda p: model_components(p, spec)["levels"]):
             full = calculate(panel)
@@ -270,10 +272,10 @@ def test_official_daily_change_accuracy():
 
     # Pinned regression on this exposed snapshot, not the <0.01 pp research target.
     mae = float(np.mean(np.abs(pred - off_chg)))
-    np.testing.assert_allclose(mae, 0.011320464284177417, rtol=0, atol=1e-9)
+    np.testing.assert_allclose(mae, 0.01127874409018208, rtol=0, atol=1e-9)
     assert float(np.mean(np.sign(pred) == np.sign(off_chg))) == 1.0
     fallback = amv.daily_change_pct(_deployed(panel, reported=False))[idx]
-    np.testing.assert_allclose(np.mean(np.abs(fallback - off_chg)), 0.011340461051749778, rtol=0, atol=1e-9)
+    np.testing.assert_allclose(np.mean(np.abs(fallback - off_chg)), 0.011298742099918106, rtol=0, atol=1e-9)
 
     # Structural check: the level must be the official level times ONE
     # constant factor, not a curve fit.

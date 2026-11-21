@@ -55,11 +55,11 @@ import numpy as np
 DECAY = 12 / 13
 
 # Initial panel sessions used to estimate the steady-state pool.
-INIT_WINDOW = 20
+INIT_WINDOW = 32
 
 # Mean official / unscaled model level over the 64 reference days.
 # For level comparisons only; constant scaling cannot change daily returns.
-OFFICIAL_LEVEL_SCALE = 0.999666095071546
+OFFICIAL_LEVEL_SCALE = 0.9996740151356378
 
 # Tushare unit conversions.
 HAND = 100.0          # 1 手 = 100 股
