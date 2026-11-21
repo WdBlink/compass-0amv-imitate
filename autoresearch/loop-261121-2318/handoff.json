@@ -1,0 +1,46 @@
+{
+  "version": "2.1.0",
+  "source": "loop",
+  "timestamp": "2026-11-21T23:18:40+08:00",
+  "status": "BOUNDED",
+  "target_met": false,
+  "results_tsv": "loop-results.tsv",
+  "config": {
+    "goal": "64 official dates: daily return MAE < 0.01 percentage points",
+    "scope": [
+      "compass_0amv",
+      "research/autoresearch"
+    ],
+    "metric": "mean absolute difference of unrounded model daily percentage change and the official displayed percentage",
+    "direction": "lower_is_better",
+    "verify": "python3 research/autoresearch/evaluate.py",
+    "budget": 25
+  },
+  "official_rows": 64,
+  "official_sha256": "176e0335f5c062fa3d93951ccb15afcaa83641f0b55da693d8c9fa90d47c75ea",
+  "data_split": [
+    32,
+    32
+  ],
+  "baseline_metric": 0.011320464284177417,
+  "selected_iteration": 2,
+  "selected_trial_commit": "c18035a",
+  "selected_metric": 0.01127874409018208,
+  "mae_dev": 0.014779466601,
+  "mae_holdout": 0.00777802158,
+  "level_ratio_cv": 0.00023945615587802897,
+  "gap_to_target_pp": 0.00127874409018208,
+  "findings": [
+    "All 64 dates had already participated in research; the two halves only guard against one lucky regime.",
+    "The seed window of the robust initialization was widened from 20 to 32 sessions. Every window from 24 to 44 passes the round-1 guard, so the choice is a plateau, not a knife edge.",
+    "decay=0.9230 reaches a lower full-window MAE (0.011231) but raises the second-half MAE and the level-ratio coefficient of variation, so the guard rejects it.",
+    "The residual is concentrated: 2026-08-03, 2026-08-31 and 2026-10-23 carry 36 percent of the absolute error, and the remaining 61 days already average 0.007183 pp.",
+    "The app's own intraday bar, read from the archived screenshots, matches the model's overnight and intraday legs within 0.05 to 0.28 pp on six of seven sampled sessions; on 2026-08-31 the model's 09:30 value lies 512.7 bn CNY below the app's own intraday low, so the app bar and the model cannot both describe that session.",
+    "Amount-based turnover, free-float turnover, dropping suspended names, lagged float, adjusted prices, survival=off, per-stock decay, turnover floors, f caps and damped turnover surprises were all measured and rejected.",
+    "The strict target is still missed by 0.001279 pp."
+  ],
+  "replay": "python3 autoresearch/loop-261121-2318/scripts/scan.py",
+  "diagnostics": "python3 autoresearch/loop-261121-2318/scripts/diagnose.py",
+  "replay_verified_rows": 30,
+  "canonical_mae_pp": 0.01127874409018208
+}

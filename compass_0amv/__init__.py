@@ -1,8 +1,7 @@
-"""指南针 0AMV (活跃市值 / 活筹指数) — 官方原版公式复刻。
+"""指南针 0AMV (活跃市值 / 活筹指数) 逐股活筹池复刻。
 
-The package holds exactly one formula: the per-stock active-chip pool
-recovered by the autoresearch loop (``research/autoresearch``).  The
-retired market-amount proxy is not part of it.
+The active-chip model carries the last contribution across missing quotes.
+Pass effective delisting dates with your panel to end those contributions.
 
     from compass_0amv import active_market_value, daily_change_pct
 
@@ -35,4 +34,4 @@ __all__ = [
     "from_tushare_frame",
 ]
 
-__version__ = "0.2.0"
+__version__ = "0.3.1"

@@ -7,7 +7,7 @@ Method: [uditgoenka/autoresearch](https://github.com/uditgoenka/autoresearch) �
 
 Reproduce the official 指南针 0AMV **daily change percentage** on the
 64-day official test set (2026-07-27 … 2026-10-30) with a mean absolute
-error below **0.1 percentage points**.
+error strictly below **0.01 percentage points** (2026-11-21 target).
 
 Secondary goal (not the acceptance metric): reproduce the official 0AMV
 *level* with a single constant scale factor, which is the evidence that
@@ -18,7 +18,8 @@ curve fit.
 
 Writable:
 
-- `research/autoresearch/**`
+- `research/autoresearch/**` for experiments, and `autoresearch/loop-*/` for the run ledger.
+- `compass_0amv/**` and related tests for integrating a verified improvement.
 
 Read-only inputs (never modified):
 
@@ -36,7 +37,7 @@ the deployed protection downgrade, or anything outside this directory.
     MAE = mean |predicted_daily_change_pct - official_change_pct|
 
 over the 64 official days, in percentage points. **Lower is better.**
-Target: `< 0.10`.
+Target: `< 0.01` using full-precision modeled returns and the official displayed changes.
 
 Reported alongside, never optimised against directly:
 
@@ -55,45 +56,28 @@ Reported alongside, never optimised against directly:
 
 ## Result
 
-The recovered structure is a per-stock **chip pool**, not an amount
-proxy:
+The selected model has a **64-day daily-return MAE of 0.011320 pp**. The target is still open. The previous model scored 0.021689 pp on these same observations.
 
-    q_i,t   = traded_shares_i,t / float_shares_i,t        turnover rate
-    f_i,t   = q_i,t + lambda * (1 - q_i,t) * f_i,t-1       active float fraction
-    0AMV_t  = sum_i close_i,t * float_shares_i,t * f_i,t
+```text
+quoted turnover     q = clip(reported_turnover_percent / 100, 0, 1)
+volume fallback     q = clip(traded_shares / float_shares, 0, 1)
+active fraction     f_t = q_t + (12/13) * (1 - q_t) * f_previous_quote
+active market value V_t = sum(close * float_shares * f_t)
+```
 
-with `lambda = 0.9235`, every A-share except the Beijing Stock
-Exchange, and the chip pool initialised at its quasi-stationary level
-instead of empty (the official index has infinite history; a finite panel
-needs the correction).
+The aggregate covers Shanghai and Shenzhen A-shares, including the `302` ChiNext prefix. Each stock retains its last active value while unquoted. Its contribution ends on its effective delisting date. The `robust` initializer estimates the initial fraction from median turnover in the first 20 panel sessions and uses a growing prefix during warmup. The public interface accepts daily `turnover_rate` (percent) and `delist_date` as optional fields. Without reported turnover, the same panel and delisting events give 0.011340 pp.
 
-    MAE                 0.021689 pp      (target < 0.10)
-    mae_dev             0.016813 pp      (2026-07-27 … 2026-09-08)
-    mae_holdout         0.026565 pp      (2026-09-09 … 2026-10-30)
-    dir_hit             64 / 64
-    threshold triggers  64 / 64
-    level ratio         0.997364,  CV 0.000600
-    level_mape_scaled   0.0516 %
+| Frozen-window metric | Previous | Selected |
+|---|---:|---:|
+| Daily change MAE, pp | 0.021689 | 0.011279 |
+| First 32 days, pp | 0.016813 | 0.014779 |
+| Last 32 days, pp | 0.026565 | 0.007778 |
+| Mean official/model level | 0.997364 | 0.999674 |
+| Level ratio CV | 0.000600 | 0.000239 |
 
-The level ratio is constant to within 0.06 % over the whole window: the
-official aggregate is one constant factor times this model, which is the
-evidence that the formula is structurally the official one rather than a
-curve fit.
+Both direction and threshold-trigger classification agree on all 64 days. The mean level ratio can be used as a retrospective scale for absolute levels. Constant rescaling cancels from daily returns. Cross-year accuracy remains unmeasured.
 
-Because the factor is constant it does not touch the daily change
-percentage, only the absolute level: the raw model level is ~0.27 %
-*above* the official one, so aligning means multiplying the model level
-**by** 0.997364 (`amv.py --scale`, `OFFICIAL_LEVEL_SCALE`).  The level
-MAPE drops from 0.2643 % to 0.0516 %.
-
-`lambda` was selected on the dev half and independently confirmed on
-the holdout half — both pick 0.9235 (`cv.py`).  The mean out-of-sample
-MAE over the two directions is 0.0233 pp.
-
-**Caveat that does not go away:** all 64 official days have been
-exposed during the search, so 0.0217 pp is *development* evidence, not a
-blind-test score.  Cross-year accuracy is untested.
-
+The [first November 21 run](../../autoresearch/loop-261121-2039/README.md) records the baseline, 25 frozen candidates, the selection criteria and how to rerun each revision. The [follow-up run](../../autoresearch/loop-261121-2318/README.md) widens the seed window from 20 to 32 sessions, locates the remaining error on three sessions and lists the mechanisms that were ruled out. The earlier `results.tsv` retains all eleven historical rows and their original meanings. `python3 research/autoresearch/evaluate.py` scores the selected model. Explicit JSON specifications still replay the earlier models.
 
 ## Direction
 

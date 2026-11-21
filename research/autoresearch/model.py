@@ -2,15 +2,15 @@
 
 Recovered structure (see program.md for the search that produced it):
 
-    q_{i,s}   = traded_shares_{i,s} / float_shares_{i,s}     daily turnover rate
+    q_{i,s}   = reported turnover percent / 100, else traded_shares / float_shares
     f_{i,t}   = q_{i,t} + lambda * (1 - q_{i,t}) * f_{i,t-1}  active float fraction
     0AMV_t    = sum_i close_{i,t} * float_shares_{i,t} * f_{i,t}
 
-Reading of the recursion: a stock's chips are a pool.  Every day a fresh
-batch of size `q_t` of the float is created by the day's trading, and the
-rest of the pool (`1 - q_t` of it) survives; on top of that the pool loses
-a fraction `1 - lambda` of its weight to age.  `lambda = 0.924` means the
-pool is worth ~92% of its previous day after one more day of no trading.
+On each update, turnover contributes a fresh fraction `q_t` and the
+surviving fraction ages by `lambda`. The current candidate uses 12/13.
+Under `quote_policy="freeze"`, a missing quote preserves both the chip
+state and the last active market value until resumption or delisting.
+Archived specs update on every panel date.
 
 Two implementation paths are kept:
 
@@ -21,11 +21,11 @@ Two implementation paths are kept:
   which is what the rejected `survival="off"` / `decay_shape="linear"`
   diagnostics need.
 
-Initialisation matters: the official index has infinite history, the
-frozen panel has 121 days.  `init="steady"` starts each stock's pool at
-its quasi-stationary level (the fixed point of the recursion under the
-stock's own mean turnover) instead of at zero, which removes the warmup
-bias without needing more data.
+The frozen panel starts partway through most stocks' trading histories.
+`init="robust"` estimates their initial pools from the median turnover
+observed through each session of the first 20. Published early levels use
+only data available at the time. The archived `steady` initialization uses
+the mean across that entire window.
 
 Everything is vectorised over the (date x stock) panel.
 """
@@ -34,15 +34,26 @@ from __future__ import annotations
 
 import numpy as np
 
-from panel import Panel, build_panel
+from panel import GROWTH_A, STAR_A, Panel, build_panel
 
 EPS = 1e-12
 
 
 def market_mask(panel: Panel, market: str) -> np.ndarray:
     """(ns,) boolean mask of the stocks included in the market aggregate."""
+    if market == "sh_sz_a":
+        sh = ("600", "601", "603", "605") + STAR_A
+        sz = ("000", "001", "002", "003") + GROWTH_A + ("302",)
+        selected = []
+        for code in panel.codes:
+            number, _, exchange = str(code).partition(".")
+            selected.append(len(number) == 6 and number.isdigit() and (
+                (exchange in ("", "SH") and number.startswith(sh)) or
+                (exchange in ("", "SZ") and number.startswith(sz))))
+        return np.array(selected, dtype=bool)
     b = panel.board
     if market == "all_a":
+        # This selector is part of the archived experiment specs (including B shares).
         return (b != "bse_a") & (b != "other")
     if market == "all_a_bse":
         return b != "other"
@@ -70,7 +81,7 @@ def float_matrix(panel: Panel, float_field: str) -> np.ndarray:
 def turnover_rates(panel: Panel, float_field: str, turnover_source: str) -> np.ndarray:
     """(nd, ns) daily turnover rate as a fraction of float."""
     fcap = float_matrix(panel, float_field)
-    if turnover_source == "vol":
+    if turnover_source in ("vol", "reported"):
         traded = panel.vol_shares
     elif turnover_source == "amount_vwap":
         traded = panel.amount_cny / np.where(panel.close > 0, panel.close, np.nan)
@@ -79,6 +90,10 @@ def turnover_rates(panel: Panel, float_field: str, turnover_source: str) -> np.n
     with np.errstate(invalid="ignore", divide="ignore"):
         q = traded / fcap
     q = np.nan_to_num(q, nan=0.0, posinf=0.0, neginf=0.0)
+    if turnover_source == "reported":
+        reported = panel.turnover_rate
+        q = np.where(np.isfinite(reported) & (reported >= 0), reported / 100.0,
+                     np.where(fcap > 0, q, 0.0))
     # A stock that cannot trade more than its float: cap at 1.
     return np.clip(q, 0.0, 1.0)
 
@@ -110,7 +125,8 @@ def active_fraction(q: np.ndarray, window: int = 13, decay: float | None = None,
                     form: str = "recursion",
                     float_shares: np.ndarray | None = None,
                     survival_power: float = 1.0,
-                    decay_turnover_beta: float = 0.0) -> np.ndarray:
+                    decay_turnover_beta: float = 0.0,
+                    quoted: np.ndarray | None = None) -> np.ndarray:
     """(nd, ns) active share fraction under the chip-pool model.
 
     form="recursion" (default, exact infinite horizon)
@@ -126,8 +142,9 @@ def active_fraction(q: np.ndarray, window: int = 13, decay: float | None = None,
         prod(...) replaced by 1           survival="off"
 
     init="zero"   : the pool starts empty at the first panel date.
-    init="steady" : the pool starts at its quasi-stationary level, which
-                    removes the warmup bias of a finite panel.
+    init="steady" : archived mean-turnover seed over the first init_window dates.
+    init="robust" : expand the median-turnover seed one date at a time, then
+                    lock it after init_window dates. Only past inputs contribute.
 
     form="shares" (rejected hypothesis, kept for reproducibility) tracks the
     chip pool as an absolute SHARE COUNT rather than a fraction of the
@@ -141,8 +158,11 @@ def active_fraction(q: np.ndarray, window: int = 13, decay: float | None = None,
     nd, ns = q.shape
     lam = 1.0 if decay is None else decay
 
+    if quoted is not None and form != "recursion":
+        raise ValueError("freezing chip state requires the recursive form")
+
     if form == "shares":
-        if init == "steady":
+        if init != "zero":
             raise ValueError("form='shares' only supports init='zero'")
         if float_shares is None:
             raise ValueError("form='shares' needs float_shares")
@@ -159,6 +179,11 @@ def active_fraction(q: np.ndarray, window: int = 13, decay: float | None = None,
         if init == "steady":
             k = min(init_window, nd)
             f0 = _steady_state(q[:k].mean(axis=0), lam, survival)
+        elif init == "robust":
+            if init_window < 1 or decay_turnover_beta:
+                raise ValueError("robust initialization requires a positive window and constant decay")
+            intercept, retained = np.zeros(ns), np.ones(ns)
+            f0 = np.zeros(ns)
         elif init == "zero":
             f0 = np.zeros(ns)
         else:
@@ -176,12 +201,27 @@ def active_fraction(q: np.ndarray, window: int = 13, decay: float | None = None,
         for t in range(nd):
             lm = lam if lam_vec is None else lam_vec
             if survival == "on":
-                prev = q[t] + lm * (1.0 - q[t]) ** survival_power * prev
+                multiplier = lm * (1.0 - q[t]) ** survival_power
             elif survival == "off":
-                prev = q[t] + lm * prev
+                multiplier = lm
             else:
                 raise ValueError(f"unknown survival {survival!r}")
-            out[t] = prev
+            if init == "robust" and t < init_window:
+                # Revalue the seed using only the prefix through this session.
+                keep = multiplier if quoted is None else np.where(quoted[t], multiplier, 1.0)
+                retained *= keep
+                intercept = q[t] + keep * intercept
+                seed = _steady_state(np.median(q[:t + 1], axis=0), lam, survival)
+                prev = intercept + retained * seed
+            else:
+                updated = q[t] + multiplier * prev
+                prev = updated if quoted is None else np.where(quoted[t], updated, prev)
+            if init == "robust" and quoted is not None:
+                # The latent seed can change during warmup. A suspended stock's
+                # published fraction and marked value stay at their last quote.
+                out[t] = np.where(quoted[t], prev, out[t - 1] if t else 0.0)
+            else:
+                out[t] = prev
         return out
 
     if form != "batch":
@@ -269,10 +309,18 @@ def model_components(panel: Panel, spec: dict) -> dict:
     fcap_raw = float_matrix(panel, spec.get("float_field", "float_share"))
     fcap = apply_float_mode(fcap_raw, spec.get("float_mode", "current"))
 
-    q = turnover_rates(panel, spec.get("float_field", "float_share"),
-                        spec.get("turnover_source", "vol"))
-    # No quote (suspended / not yet listed) means no turnover that day.
-    q = np.where(np.isfinite(panel.close) & (panel.close > 0), q, 0.0)
+    source = spec.get("turnover_source", "vol")
+    q = turnover_rates(panel, spec.get("float_field", "float_share"), source)
+    has_close = np.isfinite(panel.close) & (panel.close > 0)
+    quote_policy = spec.get("quote_policy", "legacy")
+    if quote_policy not in ("legacy", "freeze"):
+        raise ValueError(f"unknown quote policy {quote_policy!r}")
+    quoted = has_close if quote_policy == "freeze" else None
+    q = np.where(has_close, q, 0.0)
+    if quoted is not None:
+        fcap = np.maximum(fcap, 0.0)
+        if source != "reported":
+            q = np.where(fcap_raw > 0, q, 0.0)
 
     form = spec.get("form", "recursion")
     f = active_fraction(q, spec.get("window", 13), spec.get("decay"),
@@ -283,12 +331,20 @@ def model_components(panel: Panel, spec: dict) -> dict:
                         form,
                         fcap_raw,
                         spec.get("survival_power", 1.0),
-                        spec.get("decay_turnover_beta", 0.0))
+                        spec.get("decay_turnover_beta", 0.0), quoted)
     px = price_series(panel, spec.get("price_fill", "zero"), spec.get("price_mode", "close"))
 
     # form="shares" already yields a share count; the others yield a
     # fraction of the float.
     W = f if form == "shares" else f * fcap
+    if quoted is not None:
+        # No value before the first quote. Carry both valuation inputs across a gap.
+        last = np.maximum.accumulate(np.where(quoted, np.arange(panel.n_dates)[:, None], -1), axis=0)
+        W = np.where(last >= 0, np.take_along_axis(W, last, axis=0), 0.0)
+        px = np.where(last >= 0, np.take_along_axis(px, last, axis=0), 0.0)
+        if panel.delist_dates is not None:
+            active = (panel.delist_dates == "") | (panel.dates[:, None] < panel.delist_dates)
+            W = np.where(active, W, 0.0)
     Wm = np.where(mask[None, :], W, 0.0)
     Pm = np.where(mask[None, :], px, 0.0)
 

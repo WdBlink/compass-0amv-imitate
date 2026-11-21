@@ -19,6 +19,7 @@ import sys
 import numpy as np
 
 from model import build_panel, daily_change_pct, model_series
+from spec import FINAL_SPEC
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 OFFICIAL_CSV = os.path.join(HERE, "..", "exact_parity_20261030", "official.csv")
@@ -108,7 +109,7 @@ def evaluate(spec: dict, panel=None) -> dict:
 
 
 def main() -> None:
-    spec = json.loads(sys.argv[1]) if len(sys.argv) > 1 else {"window": 13}
+    spec = json.loads(sys.argv[1]) if len(sys.argv) > 1 else FINAL_SPEC
     res = evaluate(spec)
     print(json.dumps({"spec": spec, **{k: v for k, v in res.items()}}, ensure_ascii=False))
     print(f"METRIC {res['metric']:.6f}", file=sys.stderr)

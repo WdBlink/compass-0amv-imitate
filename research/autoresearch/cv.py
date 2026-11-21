@@ -1,12 +1,10 @@
 """Honest parameter selection for the 0AMV model.
 
-The 64 official days are all exposed, so a plain grid search reports an
-optimistic number.  This tool splits the window in half, selects the
-spec on one half and reports the score on the other, in both
-directions.  The mean of the two out-of-sample scores is the number to
-trust when judging whether a structural change really helped.
+All 64 official days were exposed during research. This diagnostic selects
+a decay and initializer on one half and scores the other, in both directions.
 
-    python3 cv.py --grid decay          # decay x init, both directions
+    python3 cv.py                       # current structure, including its exact decay
+    python3 cv.py --grid legacy-decay   # archived 0.9235 experiment grid
     python3 cv.py --spec '<json>'       # one spec, both directions
 """
 
@@ -18,9 +16,9 @@ import json
 
 import numpy as np
 
-from evaluate import dev_mask, evaluate, load_official
+from evaluate import evaluate, load_official
 from model import build_panel
-from spec import FINAL_SPEC
+from spec import FINAL_SPEC, LEGACY_SPEC
 
 
 def halves(panel):
@@ -43,34 +41,28 @@ def score_on(panel, spec, which) -> float:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--grid", choices=["decay"], default="decay")
+    ap.add_argument("--grid", choices=["decay", "legacy-decay"], default="decay")
     ap.add_argument("--spec", default=None)
     ap.add_argument("--top", type=int, default=12)
     args = ap.parse_args()
 
     panel = build_panel()
-    off_dates, _, _ = load_official()
-    n = len(off_dates)
-    dev = dev_mask(n)
-    hold = ~dev
-
     if args.spec:
         specs = [json.loads(args.spec)]
     else:
-        specs = []
-        for lam, init in itertools.product(
-            np.arange(0.9180, 0.9301, 0.0005), ("zero", "steady"),
-        ):
-            specs.append({"decay": float(lam), "init": init, "market": "all_a",
-                          "form": "recursion"})
+        base = LEGACY_SPEC if args.grid == "legacy-decay" else FINAL_SPEC
+        decays = np.arange(0.9180, 0.9301, 0.0005)
+        if args.grid == "decay":
+            decays = np.unique(np.append(decays, base["decay"]))
+        initializers = ("zero", "steady", "robust") if args.grid == "decay" else ("zero", "steady")
+        specs = [dict(base, decay=float(lam), init=init)
+                 for lam, init in itertools.product(decays, initializers)]
 
     rows = []
     for spec in specs:
-        d = score_on(panel, spec, dev)
-        h = score_on(panel, spec, hold)
         full = evaluate(spec, panel)
-        rows.append((d, h, full["mae"], full["dir_hit"], full["level_ratio_cv"],
-                     full["level_mape_scaled_pct"], spec))
+        rows.append((full["mae_dev"], full["mae_holdout"], full["mae"], full["dir_hit"],
+                     full["level_ratio_cv"], full["level_mape_scaled_pct"], spec))
 
     # Selection discipline: pick by dev, report the holdout score.
     by_dev = min(rows, key=lambda r: r[0])
