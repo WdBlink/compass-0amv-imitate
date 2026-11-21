@@ -69,15 +69,15 @@ The aggregate covers Shanghai and Shenzhen A-shares, including the `302` ChiNext
 
 | Frozen-window metric | Previous | Selected |
 |---|---:|---:|
-| Daily change MAE, pp | 0.021689 | 0.011320 |
-| First 32 days, pp | 0.016813 | 0.014859 |
-| Last 32 days, pp | 0.026565 | 0.007782 |
-| Mean official/model level | 0.997364 | 0.999666 |
-| Level ratio CV | 0.000600 | 0.000241 |
+| Daily change MAE, pp | 0.021689 | 0.011279 |
+| First 32 days, pp | 0.016813 | 0.014779 |
+| Last 32 days, pp | 0.026565 | 0.007778 |
+| Mean official/model level | 0.997364 | 0.999674 |
+| Level ratio CV | 0.000600 | 0.000239 |
 
 Both direction and threshold-trigger classification agree on all 64 days. The mean level ratio can be used as a retrospective scale for absolute levels. Constant rescaling cancels from daily returns. Cross-year accuracy remains unmeasured.
 
-The [November 21 run](../../autoresearch/loop-261121-2039/README.md) records the baseline, 25 frozen candidates, the selection criteria and how to rerun each revision. The earlier `results.tsv` retains all eleven historical rows and their original meanings. `python3 research/autoresearch/evaluate.py` scores the selected model. Explicit JSON specifications still replay the earlier models.
+The [first November 21 run](../../autoresearch/loop-261121-2039/README.md) records the baseline, 25 frozen candidates, the selection criteria and how to rerun each revision. The [follow-up run](../../autoresearch/loop-261121-2318/README.md) widens the seed window from 20 to 32 sessions, locates the remaining error on three sessions and lists the mechanisms that were ruled out. The earlier `results.tsv` retains all eleven historical rows and their original meanings. `python3 research/autoresearch/evaluate.py` scores the selected model. Explicit JSON specifications still replay the earlier models.
 
 ## Direction
 
