@@ -4,16 +4,10 @@
     python3 compare_table.py --csv out.csv       # same rows as CSV
     python3 compare_table.py --series-out s.csv  # full model series, raw + aligned
 
-The official labels are read here only for display; the model never sees
-them.
-
-Level alignment
----------------
-The official aggregate equals this model's level times one constant factor
-(`level_ratio`, 0.997364 on the 64-day window).  The model level is
-therefore ~0.27% *above* the official one, and aligning means multiplying
-the model level BY that factor, not dividing.  The daily change percentage
-is invariant to the factor, so only the level columns move.
+Use --legacy to reproduce the original 0.9235 comparison. The model
+predicts unscaled levels. The aligned display column multiplies those
+levels by the mean official/model ratio over all 64 retrospective dates.
+This display calculation leaves daily changes unchanged.
 """
 
 from __future__ import annotations
@@ -26,14 +20,14 @@ import numpy as np
 
 from evaluate import dev_mask, load_official
 from model import build_panel, daily_change_pct, model_series
-from spec import FINAL_SPEC
+from spec import FINAL_SPEC, LEGACY_SPEC
 
 
-def build_rows() -> tuple[list[dict], float]:
+def build_rows(spec=FINAL_SPEC) -> tuple[list[dict], float]:
     """Return (rows, level_ratio) for the 64 official days."""
     panel = build_panel()
     off_dates, off_close, off_chg = load_official()
-    levels = model_series(panel, FINAL_SPEC)
+    levels = model_series(panel, spec)
     chg = daily_change_pct(levels)
     idx = [panel.date_index(d) for d in off_dates]
     pred_chg = chg[idx]
@@ -62,16 +56,16 @@ def build_rows() -> tuple[list[dict], float]:
     return rows, level_ratio
 
 
-def write_series(path: str) -> None:
+def write_series(path: str, spec=FINAL_SPEC) -> None:
     """Write the full panel series, raw and official-aligned.
 
     The alignment factor is the one fitted on the 64-day official window;
     it is a constant, so the aligned series keeps the same daily changes.
     """
     panel = build_panel()
-    levels = model_series(panel, FINAL_SPEC)
+    levels = model_series(panel, spec)
     chg = daily_change_pct(levels)
-    _, level_ratio = build_rows()
+    _, level_ratio = build_rows(spec)
     with open(path, "w", newline="", encoding="utf-8") as fh:
         w = csv.writer(fh)
         w.writerow(["trade_date", "amv_yi", "amv_yi_aligned", "change_pct"])
@@ -88,9 +82,11 @@ def main() -> None:
     ap.add_argument("--md", default=None, help="write the 64 comparison rows as Markdown")
     ap.add_argument("--series-out", default=None,
                     help="write the full model series (raw + official-aligned) as CSV")
+    ap.add_argument("--legacy", action="store_true", help="reproduce the archived 0.9235 model")
     args = ap.parse_args()
+    spec = LEGACY_SPEC if args.legacy else FINAL_SPEC
 
-    rows, level_ratio = build_rows()
+    rows, level_ratio = build_rows(spec)
     mae = float(np.mean([r["abs_err_pp"] for r in rows]))
     lvl_mape_raw = float(np.mean([abs(r["model_close"] - r["official_close"])
                                    / r["official_close"] for r in rows]) * 100.0)
@@ -130,7 +126,7 @@ def main() -> None:
         print(f"wrote {args.md}", file=sys.stderr)
 
     if args.series_out:
-        write_series(args.series_out)
+        write_series(args.series_out, spec)
 
     print("\n".join(table))
 

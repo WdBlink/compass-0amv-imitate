@@ -21,7 +21,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-SNAPSHOT_ROOT = "/Users/wdblink/Data/datasets/derived/compass-0amv/r2-20261030"
+SNAPSHOT_ROOT = os.path.expanduser("~/Data/datasets/derived/compass-0amv/r2-20261030")
 RAW_DIR = os.path.join(SNAPSHOT_ROOT, "raw")
 CACHE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_panel_cache.npz")
 
@@ -50,7 +50,8 @@ class Panel:
     free_shares: np.ndarray    # (nd, ns)
     circ_mv: np.ndarray        # (nd, ns) CNY
     turnover_rate: np.ndarray  # (nd, ns) percent
-    board: np.ndarray          # (ns,) board label string
+    board: np.ndarray          # (ns,) legacy board label, 302 is "other"
+    delist_dates: np.ndarray | None = None  # (ns,) YYYYMMDD, "" for unknown
 
     @property
     def n_dates(self) -> int:
@@ -87,6 +88,37 @@ def _load_endpoint(prefix: str, raw_dir: str) -> dict[str, dict[str, dict]]:
     return out
 
 
+def _load_delist_dates(raw_dir, codes, dates) -> np.ndarray:
+    """Align effective delist dates for the listing that overlaps this panel.
+
+    Missing stock_basic files (including a detached legacy cache) supply no
+    exit events. An older delisting still excludes a code unless a subsequent
+    listing is documented. The frozen panel has one listing per observed code.
+    """
+    exits = {}
+    older_exits = {}
+    observed = set(codes)
+    for path in sorted(glob.glob(os.path.join(raw_dir, "stock_basic_*.json"))):
+        with open(path, encoding="utf-8") as fh:
+            response = json.load(fh)
+        if response.get("code") != 0:
+            raise ValueError(f"failed stock_basic response: {path}")
+        data = response["data"]
+        for row in data["items"]:
+            record = dict(zip(data["fields"], row))
+            code = record["ts_code"]
+            start, end = record.get("list_date") or "", record.get("delist_date") or ""
+            if code not in observed or start > dates[-1]:
+                continue
+            if end and end < dates[0]:
+                older_exits[code] = max(older_exits.get(code, ""), end)
+                continue
+            if code in exits and exits[code] != end:
+                raise ValueError(f"conflicting stock_basic listing intervals in panel for {code}")
+            exits[code] = end
+    return np.array([exits.get(code, older_exits.get(code, "")) for code in codes], dtype=str)
+
+
 def _board_of(code: str) -> str:
     num = code[:6]
     if num.startswith(B_SHARE):
@@ -110,17 +142,20 @@ def _check_dates(dates, required_dates):
 
 def _check_usable(panel):
     for name, values in vars(panel).items():
+        if name == "delist_dates" and values is None:
+            continue
         shape = ((panel.n_dates,) if name == "dates" else
-                 (panel.n_stocks,) if name in ("codes", "board") else
+                 (panel.n_stocks,) if name in ("codes", "board", "delist_dates") else
                  (panel.n_dates, panel.n_stocks))
         if values.shape != shape:
             raise ValueError(f"panel {name} shape {values.shape} != {shape}")
     # Missing individual observations remain NaN (suspensions/listings).
     usable = (np.isfinite(panel.close) & (panel.close > 0)
               & np.isfinite(panel.float_shares) & (panel.float_shares > 0)
-              & np.isfinite(panel.vol_shares))
+              & (np.isfinite(panel.vol_shares)
+                 | (np.isfinite(panel.turnover_rate) & (panel.turnover_rate >= 0))))
     if not usable.any():
-        raise ValueError("panel has no usable price/float/volume observations")
+        raise ValueError("panel has no usable price/float/turnover observations")
 
 
 def build_panel(use_cache: bool = True, *, snapshot_root: str | os.PathLike | None = None,
@@ -137,7 +172,10 @@ def build_panel(use_cache: bool = True, *, snapshot_root: str | os.PathLike | No
             if not z["dates"].size or not z["codes"].size:
                 raise ValueError("empty panel cache")
             _check_dates(z["dates"], required_dates)
-            panel = Panel(**{name: z[name] for name in Panel.__dataclass_fields__})
+            fields = {name: z[name] for name in Panel.__dataclass_fields__ if name != "delist_dates"}
+            delist_dates = (z["delist_dates"] if "delist_dates" in z.files
+                            else _load_delist_dates(raw_dir, fields["codes"], fields["dates"]))
+            panel = Panel(**fields, delist_dates=delist_dates)
         _check_usable(panel)
         return panel
 
@@ -180,7 +218,7 @@ def build_panel(use_cache: bool = True, *, snapshot_root: str | os.PathLike | No
             j = ci.get(c)
             if j is None:
                 continue
-            tor[i, j] = rec["turnover_rate"]
+            tor[i, j] = rec.get("turnover_rate")
             fsh[i, j] = rec["float_share"] * 10000.0 if rec["float_share"] is not None else np.nan
             frsh[i, j] = rec["free_share"] * 10000.0 if rec["free_share"] is not None else np.nan
             cmv[i, j] = rec["circ_mv"] * 10000.0 if rec["circ_mv"] is not None else np.nan
@@ -190,13 +228,10 @@ def build_panel(use_cache: bool = True, *, snapshot_root: str | os.PathLike | No
     panel = Panel(dates=np.array(dates), codes=np.array(codes), close=close, adj_factor=adj,
                   vol_shares=vol,
                   amount_cny=amt, float_shares=fsh, free_shares=frsh, circ_mv=cmv,
-                  turnover_rate=tor, board=board)
+                  turnover_rate=tor, board=board, delist_dates=_load_delist_dates(raw_dir, codes, dates))
     _check_usable(panel)
     if root is None:
-        np.savez_compressed(CACHE_PATH, dates=panel.dates, codes=panel.codes, close=close,
-                        adj_factor=adj,
-                        vol_shares=vol, amount_cny=amt, float_shares=fsh, free_shares=frsh,
-                        circ_mv=cmv, turnover_rate=tor, board=board)
+        np.savez_compressed(CACHE_PATH, **vars(panel))
     return panel
 
 

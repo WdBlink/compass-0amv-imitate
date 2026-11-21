@@ -1,0 +1,47 @@
+{
+  "version": "2.1.0",
+  "source": "loop",
+  "timestamp": "2026-11-21T21:24:06+08:00",
+  "status": "BOUNDED",
+  "target_met": false,
+  "results_tsv": "loop-results.tsv",
+  "config": {
+    "goal": "64 official dates: daily return MAE < 0.01 percentage points",
+    "scope": [
+      "compass_0amv",
+      "research/autoresearch"
+    ],
+    "metric": "mean absolute difference of unrounded model daily percentage change and the official displayed percentage",
+    "direction": "lower_is_better",
+    "verify": "python3 research/autoresearch/evaluate.py",
+    "budget": 25
+  },
+  "official_rows": 64,
+  "official_sha256": "176e0335f5c062fa3d93951ccb15afcaa83641f0b55da693d8c9fa90d47c75ea",
+  "data_split": [
+    32,
+    32
+  ],
+  "baseline_metric": 0.02168868156141366,
+  "selected_iteration": 24,
+  "selected_trial_commit": "90b94b47e702ffba22f19eee6775e282eb1c1899",
+  "selected_metric": 0.01132046428418106,
+  "mae_dev": 0.014858723598311335,
+  "mae_holdout": 0.007782204970050785,
+  "level_ratio_cv": 0.00024143655486525984,
+  "findings": [
+    "All 64 dates had already participated in research.",
+    "Carry the last valid mark and pause the chip clock when there is no price; remove a delisted stock from the effective date.",
+    "Include the 302 ChiNext prefix, initialize with robust turnover, and use disclosed daily turnover with volume/float fallback.",
+    "The second half clears the target; the full window does not."
+  ],
+  "replay": "python3 autoresearch/loop-261121-2039/replay.py",
+  "replay_verified_rows": 26,
+  "canonical_mae_pp": 0.011320464284177417,
+  "max_abs_error_pp": 0.11398491818274192,
+  "days_below_0_01_pp": 49,
+  "largest_residual_dates": [
+    "2026-08-31",
+    "2026-10-23"
+  ]
+}
